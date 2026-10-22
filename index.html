@@ -175,7 +175,7 @@ function dirRows(){
 
 function dirBody(){
   const rows = dirRows(), per = 15;
-  const tr = rows.slice(S.pg * per, S.pg * per + per).map(a => '<tr tabindex="0" data-id="' + a.id + '" class="cursor-pointer border-t border-slate-100 hover:bg-blue-55 ' + (a.id===S.sel?'bg-blue-50':'') + '">' +
+  const tr = rows.slice(S.pg * per, S.pg * per + per).map(a => '<tr tabindex="0" data-id="' + a.id + '" class="cursor-pointer border-t border-slate-100 hover:bg-blue-50 ' + (a.id===S.sel?'bg-blue-50':'') + '">' +
     '<td class="px-3 py-2 font-medium">' + esc(a.area_code) + '</td><td class="px-3">' + esc(a.area_name) + '</td><td class="px-3">' + esc(a.building) + '</td><td class="px-3">' + esc(a.department) + '</td><td class="px-3">' + f2(a.length_m) + '</td><td class="px-3">' + f2(a.width_m) + '</td><td class="px-3 font-medium">' + f2(a.area_sqm) + '</td>' +
     '<td class="max-w-48 truncate px-3">' + esc(a.description) + '</td><td class="px-3 text-slate-500">' + new Date(a.updated_at).toLocaleDateString() + '</td><td class="px-3"><button data-view="' + a.id + '" class="text-blue-600 hover:underline">View on plan</button></td></tr>').join('');
   $('dbody').innerHTML = tr || '<tr><td colspan="10" class="p-8 text-center text-slate-500">' + (S.loading ? 'Loading…' : 'No areas found.') + '</td></tr>';
@@ -274,7 +274,7 @@ function settingsHTML(){
   return '<div class="max-w-3xl space-y-4"><div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Upload Floor Plan</h3>' +
    '<input id="pname" class="' + INP + '" placeholder="Floor plan name"><input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="' + PRI + '">Upload Plan</button></div>' +
    '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3>' + S.plans.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
-    (p.is_active ? '' : '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet.</p></div></div>';
+    (p.is_active ? '' : '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet[cite: 2].</p></div></div>';
 }
 
 function bindSettings(){
