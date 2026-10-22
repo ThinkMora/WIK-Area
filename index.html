@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Area Dimension Monitoring System</title>
+<script src="config.js"></script>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+</head><body class="bg-slate-50 text-slate-900"><div id="app"></div>
+<script>
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const S = { session:null, role:'viewer', page:'dashboard', areas:[], plan:null, viewPlan:null, url:null, size:null, loading:true, sel:new URLSearchParams(location.search).get('area'),
+  labels:true, z:1, pan:{x:0,y:0}, q:'', dq:'', db:'', dd:'', sort:'area_name', asc:true, pg:0, editId:null, form:{}, plans:[] };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f2 = n => Number(n).toFixed(2);
+const INP = 'w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm focus:outline focus:outline-2 focus:outline-blue-500';
+const BTN = 'rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 ';
+const PRI = BTN + 'bg-blue-600 text-white hover:bg-blue-700', GHO = BTN + 'border border-slate-300 bg-white hover:bg-slate-50';
+const isAdmin = () => S.role === 'admin';
+const selArea = () => S.areas.find(a => a.id === S.sel);
+function toast(m){ const t=document.createElement('div'); t.setAttribute('role','status'); t.className='fixed bottom-4 right-4 z-50 rounded-md bg-slate-900 px-4 py-2 text-sm text-white shadow-lg'; t.textContent=m; document.body.append(t); setTimeout(()=>t.remove(),3500); }
+function select(id){ S.sel=id; const u=new URL(location.href); id?u.searchParams.set('area',id):u.searchParams.delete('area'); history.replaceState(null,'',u); render(); }
+
+/* ---------- data ---------- */
+async function load(){
+  S.loading=true; render();
+  let q = sb.from('floor_plans').select('*');
+  const { data:p } = S.viewPlan && isAdmin() ? await q.eq('id',S.viewPlan).maybeSingle() : await q.eq('is_active',true).maybeSingle();
+  S.plan=p; S.size = p?.image_width && p?.image_height ? {w:p.image_width,h:p.image_height} : null;
+  if (p) {
+    const [a,s] = await Promise.all([ sb.from('areas').select('*').eq('floor_plan_id',p.id).order('area_code'), sb.storage.from('floor-plans').createSignedUrl(p.storage_path,3600) ]);
+    S.areas=a.data||[]; S.url=s.data?.signedUrl||null; if (S.sel && !S.areas.some(x=>x.id===S.sel)) S.sel=null;
+  } else { S.areas=[]; S.url=null; }
+  S.loading=false; render();
+}
+async function init(){
+  const { data } = await sb.auth.getSession(); S.session=data.session;
+  sb.auth.onAuthStateChange((_e,s)=>{ const was=!!S.session; S.session=s; if (!!s!==was) start(); });
+  start();
+}
+async function start(){
+  if (!S.session) return render();
+  const { data } = await sb.from('profiles').select('role').eq('id',S.session.user.id).maybeSingle(); S.role=data?.role||'viewer';
+  load();
+}
+
+/* ---------- floor plan ---------- */
+function planHTML(draw){
+  const W=S.size?.w||1000, H=S.size?.h||700;
+  const gs = S.areas.filter(a=>!(draw&&a.id===S.editId)).map(a=>{
+    const x=a.x*W,y=a.y*H,w=a.w*W,h=a.h*H, sel=a.id===S.sel, fs=Math.min(h*.4, w/Math.max(a.area_code.length,1)*1.6);
+    return `<g data-id="${a.id}" tabindex="0" role="button" aria-label="${esc(a.area_code+' '+a.area_name)}" class="area cursor-pointer" style="outline:none">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${sel?'rgba(37,99,235,.22)':'rgba(15,23,42,.02)'}" stroke="${sel?'#2563eb':'#475569'}" stroke-width="${sel?3:1.5}" vector-effect="non-scaling-stroke"/>
+      ${S.labels&&fs>=6?`<text x="${x+w/2}" y="${y+h/2}" text-anchor="middle" dominant-baseline="central" font-size="${fs}" font-weight="600" fill="${sel?'#1d4ed8':'#0f172a'}" stroke="#fff" stroke-width="${fs/6}" paint-order="stroke" pointer-events="none">${esc(a.area_code)}</text>`:''}</g>`; }).join('');
+  return `<div id="pv" class="relative h-full min-h-[380px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style="touch-action:none;cursor:${draw?'crosshair':'grab'}">
+    <div class="absolute right-3 top-3 z-10 flex flex-col gap-1"><button data-z="in" aria-label="Zoom in" class="${GHO}">＋</button><button data-z="out" aria-label="Zoom out" class="${GHO}">－</button><button data-z="reset" aria-label="Reset view" class="${GHO}">⟲</button></div>
+    ${!S.plan?'<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">Belum ada denah aktif. Admin dapat mengunggahnya di Settings.</p>':''}
+    <div id="pload" class="absolute inset-0 animate-pulse bg-slate-200 ${S.url?'':'hidden'}"></div><p id="perr" class="absolute inset-0 hidden place-items-center p-6 text-center text-sm text-red-600">Gambar denah gagal dimuat. Periksa bucket Storage dan izin akses.</p>
+    <div class="grid h-full w-full place-items-center"><div id="pbox" class="relative" style="width:100%;aspect-ratio:${W}/${H}">
+      ${S.url?`<img id="pimg" src="${esc(S.url)}" alt="Denah fasilitas" draggable="false" class="absolute inset-0 h-full w-full select-none">`:''}
+      <svg id="psvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="absolute inset-0 h-full w-full">${gs}<rect id="draft" class="hidden" fill="rgba(20,184,166,.25)" stroke="#0d9488" stroke-width="2" stroke-dasharray="8 4" vector-effect="non-scaling-stroke" pointer-events="none"/></svg></div></div>
+    <div id="ptip" class="pointer-events-none absolute bottom-3 left-3 hidden rounded-md bg-slate-900/90 px-2.5 py-1 text-xs text-white"></div></div>`;
+}
+function fit(){ const pv=$('pv'), box=$('pbox'); if(!pv||!box) return; const W=S.size?.w||1000,H=S.size?.h||700, s=Math.min(pv.clientWidth/W, pv.clientHeight/H);
+  box.style.width=W*s+'px'; box.style.height=H*s+'px'; box.style.transform=`translate(${S.pan.x}px,${S.pan.y}px) scale(${S.z})`; }
+function drawDraft(r){ const d=$('draft'); if(!d) return; const W=S.size?.w||1000,H=S.size?.h||700;
+  if(!r){ d.classList.add('hidden'); return; } d.classList.remove('hidden'); d.setAttribute('x',r.x*W); d.setAttribute('y',r.y*H); d.setAttribute('width',r.w*W); d.setAttribute('height',r.h*H); }
+function bindPlan(draw){
+  const pv=$('pv'); if(!pv) return; fit();
+  new ResizeObserver(fit).observe(pv);
+  const img=$('pimg'); if(img){ img.onload=()=>{ $('pload').classList.add('hidden'); if(!S.size){ S.size={w:img.naturalWidth,h:img.naturalHeight}; render(); } }; img.onerror=()=>{ $('pload').classList.add('hidden'); $('perr').classList.remove('hidden'); $('perr').classList.add('grid'); }; }
+  pv.querySelectorAll('[data-z]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const k=b.dataset.z; if(k==='reset'){S.z=1;S.pan={x:0,y:0};} else S.z=Math.min(6,Math.max(.5,S.z*(k==='in'?1.25:1/1.25))); fit(); });
+  pv.querySelectorAll('.area').forEach(g=>{
+    const a=S.areas.find(x=>x.id===g.dataset.id), tip=$('ptip'), show=()=>{ tip.textContent=a.area_code+' · '+a.area_name; tip.classList.remove('hidden'); g.firstElementChild.setAttribute('fill','rgba(37,99,235,.10)'); };
+    const hide=()=>{ tip.classList.add('hidden'); g.firstElementChild.setAttribute('fill',a.id===S.sel?'rgba(37,99,235,.22)':'rgba(15,23,42,.02)'); };
+    g.onmouseenter=g.onfocus=show; g.onmouseleave=g.onblur=hide; g.onpointerdown=e=>e.stopPropagation();
+    const act=()=> draw ? loadForm(a) : select(a.id===S.sel?null:a.id);
+    g.onclick=act; g.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); act(); } };
+  });
+  const frac=e=>{ const r=$('pbox').getBoundingClientRect(); return { x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)), y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height)) }; };
+  let st=null;
+  pv.onpointerdown=e=>{ pv.setPointerCapture(e.pointerId); st = draw ? {p0:frac(e),p1:frac(e)} : {sx:e.clientX,sy:e.clientY,ox:S.pan.x,oy:S.pan.y}; };
+  pv.onpointermove=e=>{ if(!st) return; if(draw){ st.p1=frac(e); drawDraft(rectOf(st)); } else { S.pan={x:st.ox+e.clientX-st.sx,y:st.oy+e.clientY-st.sy}; fit(); } };
+  pv.onpointerup=()=>{ if(st&&draw){ const r=rectOf(st); if(r.w>.005&&r.h>.005) setRect(r); } st=null; };
+}
+const rectOf=s=>({x:Math.min(s.p0.x,s.p1.x),y:Math.min(s.p0.y,s.p1.y),w:Math.abs(s.p1.x-s.p0.x),h:Math.abs(s.p1.y-s.p0.y)});
+
+/* ---------- views ---------- */
+function detailsHTML(){
+  const a=selArea(); if(!a) return '<p class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Select an area on the floor plan to view its dimensions.</p>';
+  const row=(k,v)=>`<div class="flex justify-between gap-3"><dt class="text-slate-500">${k}</dt><dd class="text-right">${esc(v||'—')}</dd></div>`;
+  return `<div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-teal-600">${esc(a.area_code)}</p><h3 class="text-lg font-semibold">${esc(a.area_name)}</h3>
+   <div class="my-3 rounded-lg bg-blue-50 p-3 text-center"><div class="text-3xl font-bold text-blue-700">${f2(a.area_sqm)} m²</div><div class="text-xs text-slate-500">${f2(a.length_m)} m × ${f2(a.width_m)} m</div></div>
+   <dl class="space-y-1.5 text-sm">${row('Building',a.building)}${row('Department',a.department)}${row('Length (m)',f2(a.length_m))}${row('Width (m)',f2(a.width_m))}${row('Total Area (m²)',f2(a.area_sqm))}${row('Description',a.description)}${row('Notes',a.notes)}${row('Last Updated',new Date(a.updated_at).toLocaleString())}</dl></div>`;
+}
+function planPage(){
+  const hits=S.areas.filter(a=>(a.area_code+a.area_name).toLowerCase().includes(S.q.toLowerCase()));
+  return `<div class="grid h-full gap-4 lg:grid-cols-[1fr_320px]"><div class="flex min-h-0 flex-col gap-3"><div class="flex flex-wrap gap-2">
+    <input id="q" class="${INP} min-w-40 flex-1" placeholder="Cari kode atau nama" value="${esc(S.q)}">
+    <select id="ddl" aria-label="Pilih area" class="${INP} w-56"><option value="">Semua area</option>${hits.map(a=>`<option value="${a.id}" ${a.id===S.sel?'selected':''}>${esc(a.area_code)} — ${esc(a.area_name)}</option>`).join('')}</select>
+    <button id="lbl" class="${GHO}">${S.labels?'Hide labels':'Show all areas'}</button>${S.sel?`<button id="clr" class="${GHO}">Tampilkan seluruh denah</button>`:''}</div>
+    <div class="min-h-[420px] flex-1">${planHTML(false)}</div></div>${detailsHTML()}</div>`;
+}
+function bindPlanPage(){
+  $('q').oninput=e=>{ S.q=e.target.value; const m=S.areas.filter(a=>(a.area_code+a.area_name).toLowerCase().includes(S.q.toLowerCase()));
+    $('ddl').innerHTML='<option value="">Semua area</option>'+m.map(a=>`<option value="${a.id}">${esc(a.area_code)} — ${esc(a.area_name)}</option>`).join(''); if(S.q&&m.length===1) select(m[0].id); };
+  $('ddl').onchange=e=>select(e.target.value||null); $('lbl').onclick=()=>{ S.labels=!S.labels; render(); }; if($('clr')) $('clr').onclick=()=>select(null);
+  bindPlan(false);
+}
+function dashboardPage(){
+  const t=S.areas.reduce((s,a)=>s+Number(a.area_sqm),0), big=S.areas.reduce((m,a)=>!m||a.area_sqm>m.area_sqm?a:m,null);
+  const c=[['Total Areas',S.areas.length],['Total Floor Area (m²)',f2(t)],['Largest Area',big?`${big.area_code} · ${f2(big.area_sqm)} m²`:'—'],['Areas with Complete Dimensions',`${S.areas.filter(a=>a.length_m>0&&a.width_m>0).length} / ${S.areas.length}`]];
+  return `<div class="flex h-full flex-col gap-4"><div class="grid grid-cols-2 gap-3 xl:grid-cols-4">${c.map(([k,v])=>`<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">${k}</div><div class="mt-1 text-xl font-semibold">${S.loading?'…':esc(v)}</div></div>`).join('')}</div><div class="min-h-0 flex-1">${planPage()}</div></div>`;
+}
+function dirRows(){
+  const rows=S.areas.filter(a=>(!S.dq||(a.area_code+a.area_name).toLowerCase().includes(S.dq.toLowerCase()))&&(!S.db||a.building===S.db)&&(!S.dd||a.department===S.dd))
+    .sort((x,y)=>{ const A=x[S.sort],B=y[S.sort]; return (A>B?1:A<B?-1:0)*(S.asc?1:-1); });
+  return rows;
+}
+function dirBody(){
+  const rows=dirRows(), per=15, tr=rows.slice(S.pg*per,S.pg*per+per).map(a=>`<tr tabindex="0" data-id="${a.id}" class="cursor-pointer border-t border-slate-100 hover:bg-blue-50 ${a.id===S.sel?'bg-blue-50':''}">
+    <td class="px-3 py-2 font-medium">${esc(a.area_code)}</td><td class="px-3">${esc(a.area_name)}</td><td class="px-3">${esc(a.building)}</td><td class="px-3">${esc(a.department)}</td><td class="px-3">${f2(a.length_m)}</td><td class="px-3">${f2(a.width_m)}</td><td class="px-3 font-medium">${f2(a.area_sqm)}</td>
+    <td class="max-w-48 truncate px-3">${esc(a.description)}</td><td class="px-3 text-slate-500">${new Date(a.updated_at).toLocaleDateString()}</td><td class="px-3"><button data-view="${a.id}" class="text-blue-600 hover:underline">Lihat di denah</button></td></tr>`).join('');
+  $('dbody').innerHTML = tr || `<tr><td colspan="10" class="p-8 text-center text-slate-500">${S.loading?'Memuat…':'Tidak ada area. Admin dapat menambah di Manage Areas.'}</td></tr>`;
+  $('dinfo').textContent=rows.length+' area'; $('prev').disabled=S.pg===0; $('next').disabled=(S.pg+1)*per>=rows.length;
+  $('dbody').querySelectorAll('tr[data-id]').forEach(r=>{ r.onclick=()=>{ S.sel=r.dataset.id; dirBody(); }; r.onkeydown=e=>e.key==='Enter'&&r.click(); });
+  $('dbody').querySelectorAll('[data-view]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); S.page='plan'; select(b.dataset.view); });
+}
+function directoryPage(){
+  const u=k=>[...new Set(S.areas.map(a=>a[k]).filter(Boolean))], th=(k,l)=>`<th data-k="${k}" class="cursor-pointer px-3 py-2 text-left">${l}${S.sort===k?(S.asc?' ↑':' ↓'):''}</th>`;
+  return `<div class="space-y-3"><div class="flex flex-wrap gap-2"><input id="dq" class="${INP} max-w-xs" placeholder="Cari kode atau nama" value="${esc(S.dq)}">
+    <select id="db" class="${INP} w-44"><option value="">Semua building</option>${u('building').map(x=>`<option ${x===S.db?'selected':''}>${esc(x)}</option>`).join('')}</select>
+    <select id="dd" class="${INP} w-44"><option value="">Semua department</option>${u('department').map(x=>`<option ${x===S.dd?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm"><thead class="bg-slate-50 text-slate-600"><tr>${th('area_code','Code')}${th('area_name','Name')}<th class="px-3 py-2 text-left">Building</th><th class="px-3 py-2 text-left">Department</th>${th('length_m','Length (m)')}${th('width_m','Width (m)')}${th('area_sqm','Area (m²)')}<th class="px-3 py-2 text-left">Description</th><th class="px-3 py-2 text-left">Updated</th><th></th></tr></thead><tbody id="dbody"></tbody></table></div>
+    <div class="flex items-center justify-between text-sm text-slate-600"><span id="dinfo"></span><div class="flex gap-2"><button id="prev" class="${GHO}">Sebelumnya</button><button id="next" class="${GHO}">Berikutnya</button></div></div></div>`;
+}
+function bindDirectory(){
+  dirBody();
+  $('dq').oninput=e=>{S.dq=e.target.value;S.pg=0;dirBody();}; $('db').onchange=e=>{S.db=e.target.value;S.pg=0;dirBody();}; $('dd').onchange=e=>{S.dd=e.target.value;S.pg=0;dirBody();};
+  $('prev').onclick=()=>{S.pg--;dirBody();}; $('next').onclick=()=>{S.pg++;dirBody();};
+  document.querySelectorAll('th[data-k]').forEach(h=>h.onclick=()=>{ const k=h.dataset.k; S.sort===k?S.asc=!S.asc:(S.sort=k,S.asc=true); render(); });
+}
+
+/* ---------- manage ---------- */
+const FIELDS=['area_code','area_name','building','department','length_m','width_m','description','notes','x','y','w','h'];
+function loadForm(a){ S.editId=a.id; S.sel=a.id; S.form={}; FIELDS.forEach(k=>S.form[k]=a[k]??''); render(); }
+function setRect(r){ ['x','y','w','h'].forEach(k=>{ S.form[k]=r[k].toFixed(6); $('f_'+k).value=S.form[k]; }); drawDraft(r); }
+function formVals(){ const v={}; FIELDS.forEach(k=>v[k]=$('f_'+k).value); return v; }
+function manageHTML(){
+  const F=(k,l,t='text')=>`<label class="block text-xs text-slate-600">${l}<input id="f_${k}" type="${t}" ${t==='number'?'step="any"':''} class="${INP} mt-0.5" value="${esc(S.form[k]??'')}"></label>`;
+  return `<div class="grid h-full gap-4 lg:grid-cols-[1fr_360px]"><div class="flex min-h-[420px] flex-col gap-2"><p class="text-sm text-slate-600">Seret di atas denah${S.plan?` “${esc(S.plan.name)}”`:''} untuk menggambar persegi panjang. Panjang dan lebar fisik diisi manual, tidak dihitung dari gambar.</p><div class="min-h-0 flex-1">${planHTML(true)}</div></div>
+   <div class="max-h-full space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">${S.editId?'Edit area':'Area baru'}</h3><ul id="errs" class="hidden rounded-md bg-red-50 p-2 text-xs text-red-700"></ul>
+   <div class="grid grid-cols-2 gap-2">${F('area_code','Area code *')}${F('area_name','Area name *')}${F('building','Building')}${F('department','Department')}${F('length_m','Length (m) *','number')}${F('width_m','Width (m) *','number')}</div>
+   <p id="calc" class="text-sm text-teal-700"></p>${F('description','Description')}${F('notes','Notes')}
+   <p class="pt-1 text-xs font-medium">Posisi persegi di denah (0–1)</p><div class="grid grid-cols-4 gap-2">${F('x','X','number')}${F('y','Y','number')}${F('w','Width','number')}${F('h','Height','number')}</div>
+   <div class="flex gap-2"><button id="save" class="${PRI}">${S.editId?'Simpan perubahan':'Buat area'}</button>${S.editId?`<button id="cancel" class="${GHO}">Batal</button>`:''}</div><hr>
+   <ul class="max-h-56 space-y-1 overflow-y-auto text-sm">${S.areas.map(a=>`<li class="flex items-center justify-between rounded px-1 hover:bg-slate-50"><button data-edit="${a.id}" class="flex-1 py-1 text-left">${esc(a.area_code)} — ${esc(a.area_name)}</button><button data-del="${a.id}" aria-label="Hapus ${esc(a.area_code)}" class="p-1 text-red-600">🗑</button></li>`).join('')||'<li class="text-slate-500">Belum ada area. Gambar satu di denah.</li>'}</ul></div></div>`;
+}
+function bindManage(){
+  bindPlan(true);
+  const live=()=>{ const v=formVals(), l=parseFloat(v.length_m), w=parseFloat(v.width_m); $('calc').textContent=l>0&&w>0?`Luas: ${f2(l*w)} m² (dihitung database)`:'';
+    const r={x:parseFloat(v.x),y:parseFloat(v.y),w:parseFloat(v.w),h:parseFloat(v.h)}; drawDraft(Object.values(r).every(n=>!isNaN(n))?r:null); };
+  FIELDS.forEach(k=>$('f_'+k).oninput=live); live();
+  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>loadForm(S.areas.find(a=>a.id===b.dataset.edit)));
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{ const a=S.areas.find(x=>x.id===b.dataset.del); if(!confirm(`Hapus ${a.area_code} — ${a.area_name}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    const {error}=await sb.from('areas').delete().eq('id',a.id); if(error) return toast(error.message); toast('Area dihapus'); S.sel=null; S.editId=null; S.form={}; load(); });
+  if($('cancel')) $('cancel').onclick=()=>{ S.editId=null; S.form={}; render(); };
+  $('save').onclick=async()=>{
+    const v=formVals(), e=[], code=v.area_code.trim(), n=k=>v[k]===''?NaN:Number(v[k]);
+    if(!code) e.push('Area code wajib diisi.'); if(!v.area_name.trim()) e.push('Area name wajib diisi.');
+    if(!(n('length_m')>0)) e.push('Length harus lebih dari nol.'); if(!(n('width_m')>0)) e.push('Width harus lebih dari nol.');
+    const r={x:n('x'),y:n('y'),w:n('w'),h:n('h')};
+    if(Object.values(r).some(isNaN)) e.push('Gambar persegi di denah atau isi X, Y, Width, Height.');
+    else { if(r.w<=0||r.h<=0) e.push('Lebar dan tinggi persegi harus positif.'); if(r.x<0||r.y<0||r.x+r.w>1.000001||r.y+r.h>1.000001) e.push('Persegi harus berada di dalam gambar (0–1).'); }
+    if(S.areas.some(a=>a.id!==S.editId&&a.area_code.toLowerCase()===code.toLowerCase())) e.push('Area code sudah dipakai di denah ini.');
+    const ul=$('errs'); ul.innerHTML=e.map(x=>`<li>${esc(x)}</li>`).join(''); ul.classList.toggle('hidden',!e.length); if(e.length||!S.plan) return;
+    const row={ floor_plan_id:S.plan.id, area_code:code, area_name:v.area_name.trim(), building:v.building||null, department:v.department||null, length_m:n('length_m'), width_m:n('width_m'),
+      description:v.description||null, notes:v.notes||null, x:+r.x.toFixed(6), y:+r.y.toFixed(6), w:+r.w.toFixed(6), h:+r.h.toFixed(6) };
+    $('save').disabled=true;
+    const { error } = S.editId ? await sb.from('areas').update(row).eq('id',S.editId) : await sb.from('areas').insert(row);
+    if(error){ $('save').disabled=false; ul.innerHTML=`<li>${esc(error.message)}</li>`; ul.classList.remove('hidden'); return; }
+    toast(S.editId?'Area diperbarui':'Area dibuat'); S.editId=null; S.form={}; load();
+  };
+}
+
+/* ---------- settings ---------- */
+async function loadPlans(){ const {data}=await sb.from('floor_plans').select('*').order('created_at',{ascending:false}); S.plans=data||[]; if(S.page==='settings') render(); }
+function settingsHTML(){
+  return `<div class="max-w-3xl space-y-4"><div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Unggah denah</h3>
+   <input id="pname" class="${INP}" placeholder="Nama denah"><input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Pratinjau" class="hidden max-h-56 rounded border"><button id="pup" class="${PRI}">Unggah denah</button></div>
+   <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Daftar denah</h3>${S.plans.map(p=>`<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">${esc(p.name)} ${p.is_active?'<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Aktif</span>':''}</span>
+    ${p.is_active?'':`<button data-copy="${p.id}" class="${GHO}">Salin area dari denah aktif</button>`}<button data-rev="${p.id}" class="${GHO}">Tinjau overlay</button>${p.is_active?'':`<button data-act="${p.id}" class="${PRI}">Aktifkan</button><button data-rm="${p.id}" aria-label="Hapus denah" class="p-1 text-red-600">🗑</button>`}</div>`).join('')||'<p class="text-sm text-slate-500">Belum ada denah. Unggah di atas.</p>'}</div></div>`;
+}
+function bindSettings(){
+  let file=null; $('pfile').onchange=e=>{ file=e.target.files[0]||null; const im=$('pprev'); if(file){ im.src=URL.createObjectURL(file); im.classList.remove('hidden'); } else im.classList.add('hidden'); };
+  $('pup').onclick=async()=>{
+    const name=$('pname').value.trim(); if(!file||!name) return toast('Isi nama dan pilih gambar.'); if(!/^image\/(png|jpeg|webp)$/.test(file.type)) return toast('Gunakan PNG, JPG, atau WebP.');
+    $('pup').disabled=true;
+    const dim=await new Promise(r=>{ const i=new Image(); i.onload=()=>r({w:i.naturalWidth,h:i.naturalHeight}); i.src=$('pprev').src; });
+    const path=crypto.randomUUID()+'-'+file.name.replace(/[^\w.-]/g,'_'), up=await sb.storage.from('floor-plans').upload(path,file);
+    if(up.error){ $('pup').disabled=false; return toast(up.error.message); }
+    const {error}=await sb.from('floor_plans').insert({name,storage_path:path,image_width:dim.w,image_height:dim.h,is_active:false});
+    if(error){ await sb.storage.from('floor-plans').remove([path]); $('pup').disabled=false; return toast(error.message); }
+    toast('Terunggah. Tinjau overlay lalu aktifkan.'); loadPlans();
+  };
+  const P=id=>S.plans.find(p=>p.id===id);
+  document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{ const p=P(b.dataset.act); if(!confirm(`Jadikan “${p.name}” denah aktif? Semua pengguna akan langsung melihatnya. Pastikan overlay sudah ditinjau.`)) return;
+    const {error}=await sb.rpc('set_active_floor_plan',{plan_id:p.id}); if(error) return toast(error.message); toast('Denah diaktifkan'); S.viewPlan=null; loadPlans(); load(); });
+  document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{ const src=S.plans.find(p=>p.is_active); if(!src) return toast('Belum ada denah aktif.');
+    const {data,error}=await sb.rpc('copy_areas',{src:src.id,dst:b.dataset.copy}); error?toast(error.message):toast(`${data} area disalin. Tinjau posisinya.`); });
+  document.querySelectorAll('[data-rev]').forEach(b=>b.onclick=()=>{ S.viewPlan=b.dataset.rev; S.sel=null; S.page='manage'; load(); });
+  document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const p=P(b.dataset.rm); if(!confirm(`Hapus “${p.name}” beserta gambarnya?`)) return;
+    const {error}=await sb.from('floor_plans').delete().eq('id',p.id); if(error) return toast(error.message.includes('areas')?'Hapus dulu semua area di denah ini.':error.message);
+    await sb.storage.from('floor-plans').remove([p.storage_path]); loadPlans(); });
+}
+
+/* ---------- shell ---------- */
+function loginHTML(){
+  return `<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>
+   <input id="em" type="email" class="${INP}" placeholder="Email"><input id="pw" type="password" class="${INP}" placeholder="Password"><p id="lm" class="text-xs text-red-600"></p>
+   <div class="flex gap-2"><button id="li" class="${PRI}">Masuk</button><button id="su" class="${GHO}">Buat akun viewer</button></div></div></div>`;
+}
+function bindLogin(){
+  const go=async su=>{ const c={email:$('em').value,password:$('pw').value}; const r=su?await sb.auth.signUp(c):await sb.auth.signInWithPassword(c); $('lm').textContent=r.error?.message||(su?'Akun dibuat. Cek email bila konfirmasi aktif, lalu masuk.':''); };
+  $('li').onclick=()=>go(false); $('su').onclick=()=>go(true); $('pw').onkeydown=e=>e.key==='Enter'&&go(false);
+}
+function render(){
+  const app=$('app');
+  if(SUPABASE_URL.includes('YOUR-PROJECT')){ app.innerHTML='<p class="p-8 text-red-600">Isi SUPABASE_URL dan SUPABASE_ANON_KEY di bagian atas skrip file ini.</p>'; return; }
+  if(!S.session){ app.innerHTML=loginHTML(); return bindLogin(); }
+  const nav=[['dashboard','Dashboard',0],['plan','Interactive Floor Plan',0],['directory','Area Directory',0],['manage','Manage Areas',1],['settings','Settings',1]].filter(n=>!n[2]||isAdmin());
+  if((S.page==='manage'||S.page==='settings')&&!isAdmin()) S.page='dashboard';
+  const body = S.page==='dashboard'?dashboardPage():S.page==='plan'?planPage():S.page==='directory'?directoryPage():S.page==='manage'?manageHTML():settingsHTML();
+  app.innerHTML=`<div class="flex h-screen flex-col md:flex-row"><nav class="flex shrink-0 gap-1 overflow-x-auto bg-[#0f1f3d] p-2 text-slate-200 md:w-60 md:flex-col md:p-3">
+    <div class="hidden px-2 pb-3 pt-1 text-sm font-semibold text-white md:block">Area Dimension Monitoring</div>
+    ${nav.map(([k,l])=>`<button data-nav="${k}" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm ${S.page===k?'bg-blue-600 text-white':'hover:bg-white/10'}">${l}</button>`).join('')}
+    <button id="out" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm hover:bg-white/10 md:mt-auto">Logout</button></nav>
+    <main class="min-h-0 flex-1 overflow-auto p-3 md:p-5">${S.viewPlan&&isAdmin()&&S.plan?`<p class="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">Meninjau “${esc(S.plan.name)}” yang belum aktif. Sesuaikan overlay, lalu aktifkan di Settings.</p>`:''}${body}</main></div>`;
+  document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{ const k=b.dataset.nav; const wasRev=S.viewPlan; if(k!=='manage'&&k!=='settings'&&S.viewPlan) S.viewPlan=null; S.page=k; S.editId=null; S.form={}; if(k==='settings') loadPlans(); (wasRev&&!S.viewPlan)?load():render(); });
+  $('out').onclick=()=>sb.auth.signOut();
+  if(S.page==='dashboard'||S.page==='plan') bindPlanPage(); else if(S.page==='directory') bindDirectory(); else if(S.page==='manage') bindManage(); else bindSettings();
+}
+init();
+</script></body></html>
