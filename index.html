@@ -216,12 +216,23 @@ function bindSettings(){
 /* ---------- shell ---------- */
 function loginHTML(){
   return `<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>
-   <input id="em" type="email" class="${INP}" placeholder="Email"><input id="pw" type="password" class="${INP}" placeholder="Password"><p id="lm" class="text-xs text-red-600"></p>
+   <input id="em" type="email" autocomplete="email" class="${INP}" placeholder="Email">
+   <input id="pw" type="password" autocomplete="current-password" class="${INP}" placeholder="Password">
+   <p id="lm" class="text-xs text-red-600"></p>
    <div class="flex gap-2"><button id="li" class="${PRI}">Masuk</button><button id="su" class="${GHO}">Buat akun viewer</button></div></div></div>`;
 }
 function bindLogin(){
-  const go=async su=>{ const c={email:$('em').value,password:$('pw').value}; const r=su?await sb.auth.signUp(c):await sb.auth.signInWithPassword(c); $('lm').textContent=r.error?.message||(su?'Akun dibuat. Cek email bila konfirmasi aktif, lalu masuk.':''); };
-  $('li').onclick=()=>go(false); $('su').onclick=()=>go(true); $('pw').onkeydown=e=>e.key==='Enter'&&go(false);
+  const go=async su=>{ 
+    const emailEl = $('em');
+    const passEl = $('pw');
+    if (!emailEl || !passEl) return;
+    const c={email: emailEl.value, password: passEl.value}; 
+    const r=su?await sb.auth.signUp(c):await sb.auth.signInWithPassword(c); 
+    $('lm').textContent=r.error?.message||(su?'Akun dibuat. Cek email bila konfirmasi aktif, lalu masuk.':''); 
+  };
+  $('li').onclick=()=>go(false); 
+  $('su').onclick=()=>go(true); 
+  $('pw').onkeydown=e=>{ if(e.key==='Enter') go(false); };
 }
 function render(){
   const app=$('app');
