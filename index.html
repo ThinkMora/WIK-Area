@@ -7,6 +7,9 @@
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-900">
 <div id="app"></div>
@@ -411,6 +414,217 @@ function bindSettings(){
   });
 }
 
+/* ---------- Reports & Export ---------- */
+const R = { floor: 'all', dept: '', plans: [], areas: [], loading: false, busy: false };
+const rInScope = a => R.floor === 'all' || a.floor === R.floor;
+const rRows = () => R.areas.filter(a => rInScope(a) && (!R.dept || a.department === R.dept))
+  .sort((x, y) => (x.floor - y.floor) || String(x.area_code).localeCompare(String(y.area_code), undefined, {numeric: true}));
+const rDepts = () => [...new Set(R.areas.filter(rInScope).map(a => a.department).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const rSum = rows => rows.reduce((s, a) => s + Number(a.area_sqm || 0), 0);
+const rScope = () => R.floor === 'all' ? 'All floors' : 'Floor ' + R.floor;
+const rGroup = (rows, fn) => { const m = new Map(); rows.forEach(a => { const k = fn(a); if(!m.has(k)) m.set(k, []); m.get(k).push(a); }); return m; };
+const rDate = () => new Date().toLocaleDateString('en-GB', {day: '2-digit', month: 'long', year: 'numeric'});
+const rStamp = () => new Date().toLocaleDateString('en-CA');
+const rFile = ext => ['area-report', R.floor === 'all' ? 'all-floors' : 'floor-' + R.floor, R.dept ? R.dept.replace(/[^\w-]+/g, '_') : null, rStamp()].filter(Boolean).join('_') + '.' + ext;
+const rMissing = () => FLOORS.filter(n => (R.floor === 'all' || R.floor === n) && !R.plans.some(p => p.floor === n));
+// [header, value getter, 'n' = number with 2 decimals]
+const RCOLS = [
+  ['Floor', a => a.floor], ['Area Code', a => a.area_code], ['Area Name', a => a.area_name], ['Building', a => a.building || ''], ['Department', a => a.department || ''],
+  ['Length (m)', a => Number(a.length_m), 'n'], ['Width (m)', a => Number(a.width_m), 'n'], ['Area (m²)', a => Number(a.area_sqm), 'n'],
+  ['Description', a => a.description || ''], ['Notes', a => a.notes || ''], ['Last Updated', a => new Date(a.updated_at).toLocaleDateString('en-CA')]
+];
+
+async function loadReport(){
+  R.loading = true; if(S.page === 'reports') render();
+  const { data: plans } = await sb.from('floor_plans').select('*').eq('is_active', true).order('floor');
+  R.plans = plans || [];
+  let areas = [];
+  if(R.plans.length){
+    const { data } = await sb.from('areas').select('*').in('floor_plan_id', R.plans.map(p => p.id)).order('area_code');
+    areas = data || [];
+  }
+  const fl = new Map(R.plans.map(p => [p.id, p.floor]));
+  R.areas = areas.map(a => ({...a, floor: fl.get(a.floor_plan_id)}));
+  if(R.dept && !rDepts().includes(R.dept)) R.dept = '';
+  R.loading = false; if(S.page === 'reports') render();
+}
+
+function reportsPage(){
+  const rows = rRows(), tot = rSum(rows), depts = rDepts(), missing = rMissing();
+  const off = R.loading || R.busy || !rows.length ? 'disabled' : '';
+  const card = (k, v) => '<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">' + k + '</div><div class="mt-1 text-xl font-semibold">' + esc(v) + '</div></div>';
+  const th = h => '<th class="px-3 py-2 text-left">' + h + '</th>';
+  return '<div class="space-y-4"><div><h2 class="text-lg font-semibold">Reports &amp; Export</h2><p class="text-sm text-slate-600">Export area data to CSV or Excel, or download a PDF report with the layout image, dimension table, total area and report date. Only active floor plans are included.</p></div>' +
+    '<div class="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4">' +
+    '<label class="block text-xs text-slate-600">Floor<select id="rf" class="' + INP + ' mt-0.5 w-40"><option value="all">All floors</option>' + FLOORS.map(n => '<option value="' + n + '" ' + (R.floor === n ? 'selected' : '') + '>Floor ' + n + '</option>').join('') + '</select></label>' +
+    '<label class="block text-xs text-slate-600">Department<select id="rd" class="' + INP + ' mt-0.5 w-52"><option value="">All departments</option>' + depts.map(d => '<option ' + (d === R.dept ? 'selected' : '') + '>' + esc(d) + '</option>').join('') + '</select></label>' +
+    '<div class="ml-auto flex flex-wrap gap-2"><button id="rcsv" ' + off + ' class="' + GHO + '">Export CSV</button><button id="rxls" ' + off + ' class="' + GHO + '">Export Excel</button><button id="rpdf" ' + off + ' class="' + PRI + '">' + (R.busy ? 'Generating PDF…' : 'Download PDF report') + '</button></div></div>' +
+    (!R.loading && missing.length ? '<p class="rounded-md bg-amber-50 p-2 text-sm text-amber-800">No active floor plan for ' + missing.map(n => 'Floor ' + n).join(', ') + '. Activate one in Settings to include it.</p>' : '') +
+    '<div class="grid grid-cols-2 gap-3 xl:grid-cols-4">' + card('Report date', rDate()) + card('Scope', rScope() + (R.dept ? ' · ' + R.dept : '')) + card('Total Areas', R.loading ? '…' : rows.length) + card('Total Area (m²)', R.loading ? '…' : f2(tot)) + '</div>' +
+    '<div class="max-h-[420px] overflow-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm"><thead class="sticky top-0 bg-slate-50 text-slate-600"><tr>' + ['Floor', 'Code', 'Name', 'Building', 'Department', 'Length (m)', 'Width (m)', 'Area (m²)'].map(th).join('') + '</tr></thead><tbody>' +
+    (rows.map(a => '<tr class="border-t border-slate-100"><td class="px-3 py-1.5">' + a.floor + '</td><td class="px-3 font-medium">' + esc(a.area_code) + '</td><td class="px-3">' + esc(a.area_name) + '</td><td class="px-3">' + esc(a.building) + '</td><td class="px-3">' + esc(a.department) + '</td><td class="px-3">' + f2(a.length_m) + '</td><td class="px-3">' + f2(a.width_m) + '</td><td class="px-3 font-medium">' + f2(a.area_sqm) + '</td></tr>').join('') ||
+      '<tr><td colspan="8" class="p-8 text-center text-slate-500">' + (R.loading ? 'Loading…' : 'No areas match this selection.') + '</td></tr>') +
+    '</tbody>' + (rows.length ? '<tfoot class="sticky bottom-0 bg-slate-50 font-semibold"><tr class="border-t border-slate-200"><td colspan="7" class="px-3 py-2 text-right">Total</td><td class="px-3 py-2">' + f2(tot) + '</td></tr></tfoot>' : '') + '</table></div></div>';
+}
+
+function bindReports(){
+  $('rf').onchange = e => { R.floor = e.target.value === 'all' ? 'all' : Number(e.target.value); if(R.dept && !rDepts().includes(R.dept)) R.dept = ''; render(); };
+  $('rd').onchange = e => { R.dept = e.target.value; render(); };
+  $('rcsv').onclick = exportCsv; $('rxls').onclick = exportXlsx; $('rpdf').onclick = exportPdf;
+}
+
+function saveBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// quote cells; neutralise text that spreadsheets would treat as a formula
+const csvCell = v => {
+  let s = v == null ? '' : String(v);
+  if(typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+
+function exportCsv(){
+  const rows = rRows(); if(!rows.length) return;
+  const lines = [RCOLS.map(c => csvCell(c[0])).join(','), ...rows.map(a => RCOLS.map(c => csvCell(c[2] === 'n' ? f2(c[1](a)) : c[1](a))).join(','))];
+  saveBlob(new Blob(['﻿' + lines.join('\r\n')], {type: 'text/csv;charset=utf-8'}), rFile('csv'));
+  toast('CSV exported (' + rows.length + ' areas).');
+}
+
+function exportXlsx(){
+  if(!window.XLSX) return toast('Excel library failed to load. Reload the page and try again.');
+  const rows = rRows(); if(!rows.length) return;
+  const n = rows.length, tot = rSum(rows);
+  const ws = XLSX.utils.aoa_to_sheet([RCOLS.map(c => c[0]), ...rows.map(a => RCOLS.map(c => c[1](a)))]);
+  rows.forEach((_, i) => ['F', 'G', 'H'].forEach(col => { const c = ws[col + (i + 2)]; if(c) c.z = '0.00'; }));
+  ws['G' + (n + 2)] = {t: 's', v: 'TOTAL'};
+  ws['H' + (n + 2)] = {t: 'n', v: tot, f: 'SUM(H2:H' + (n + 1) + ')', z: '0.00'};
+  ws['!ref'] = 'A1:K' + (n + 2);
+  ws['!autofilter'] = {ref: 'A1:K' + (n + 1)};
+  ws['!cols'] = [6, 12, 28, 16, 18, 12, 12, 12, 32, 32, 14].map(w => ({wch: w}));
+  const grp = map => [...map].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, {numeric: true})).map(([k, v]) => [k, v.length, +rSum(v).toFixed(2)]);
+  const sum = XLSX.utils.aoa_to_sheet([
+    ['Area Dimension Report'], ['Report date', rDate()], ['Scope', rScope()], ['Department', R.dept || 'All departments'], ['Total areas', n], ['Total area (m²)', +tot.toFixed(2)], [],
+    ['By floor'], ['Floor', 'Areas', 'Total area (m²)'], ...grp(rGroup(rows, a => 'Floor ' + a.floor)), [],
+    ['By department'], ['Department', 'Areas', 'Total area (m²)'], ...grp(rGroup(rows, a => a.department || 'Unassigned'))
+  ]);
+  sum['!cols'] = [{wch: 28}, {wch: 14}, {wch: 18}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Areas'); XLSX.utils.book_append_sheet(wb, sum, 'Summary');
+  XLSX.writeFile(wb, rFile('xlsx'));
+  toast('Excel exported (' + n + ' areas).');
+}
+
+// floor plan image with the area rectangles drawn on top (areas of the chosen department highlighted)
+async function rLayoutImage(plan, areas){
+  const { data: blob, error } = await sb.storage.from('floor-plans').download(plan.storage_path);
+  if(error || !blob) throw new Error(error?.message || 'Could not download the floor plan image');
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('Floor plan image could not be read')); i.src = url; });
+    const k = Math.min(1, 1800 / img.naturalWidth), W = Math.round(img.naturalWidth * k), H = Math.round(img.naturalHeight * k);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+    const lw = Math.max(2, W / 600);
+    g.lineJoin = 'round'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for(const a of areas){
+      const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H, on = !R.dept || a.department === R.dept;
+      if(on){ g.fillStyle = 'rgba(37,99,235,.18)'; g.fillRect(x, y, w, h); }
+      g.lineWidth = on ? lw : lw / 2; g.strokeStyle = on ? '#2563eb' : 'rgba(100,116,139,.55)'; g.strokeRect(x, y, w, h);
+      const fs = Math.min(h * .4, w / Math.max(String(a.area_code).length, 1) * 1.6);
+      if(on && fs >= 6){
+        g.font = '600 ' + fs + 'px Helvetica, Arial, sans-serif';
+        g.lineWidth = fs / 6; g.strokeStyle = '#fff'; g.strokeText(String(a.area_code), x + w / 2, y + h / 2);
+        g.fillStyle = '#1e3a8a'; g.fillText(String(a.area_code), x + w / 2, y + h / 2);
+      }
+    }
+    return { data: c.toDataURL('image/jpeg', .85), w: W, h: H };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function exportPdf(){
+  const J = window.jspdf && window.jspdf.jsPDF;
+  if(!J) return toast('PDF library failed to load. Reload the page and try again.');
+  const rows = rRows(); if(!rows.length || R.busy) return;
+  R.busy = true; render();
+  try {
+    const doc = new J({unit: 'mm', format: 'a4'}), M = 14, PW = 210, tot = rSum(rows);
+    const NAVY = [15, 31, 61], dept = R.dept || 'All departments';
+    const title = (t, y) => { doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(15, 23, 42); doc.text(t, M, y); };
+    const R_ = c => ({content: c, styles: {halign: 'right'}});
+
+    // ---- page 1: summary
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(15, 23, 42); doc.text('Area Dimension Report', M, 22);
+    doc.setDrawColor(37, 99, 235); doc.setLineWidth(.8); doc.line(M, 26, PW - M, 26);
+    doc.autoTable({
+      startY: 31, theme: 'plain', styles: {fontSize: 10, cellPadding: 1.6}, margin: {left: M, right: M},
+      columnStyles: {0: {fontStyle: 'bold', cellWidth: 45}},
+      body: [['Report date', rDate()], ['Scope', rScope()], ['Department filter', dept], ['Total areas', String(rows.length)], ['Total area', f2(tot) + ' m²']]
+    });
+    let y = doc.lastAutoTable.finalY + 9;
+    title('Summary by floor', y);
+    doc.autoTable({
+      startY: y + 3, theme: 'grid', styles: {fontSize: 9, cellPadding: 2}, headStyles: {fillColor: NAVY}, margin: {left: M, right: M},
+      head: [['Floor', 'Active floor plan', R_('Areas'), R_('Total area (m²)')]],
+      body: [...rGroup(rows, a => a.floor)].map(([f, v]) => ['Floor ' + f, (R.plans.find(p => p.floor === f) || {}).name || '-', R_(String(v.length)), R_(f2(rSum(v)))]),
+      foot: [[{content: 'TOTAL', colSpan: 2}, R_(String(rows.length)), R_(f2(tot))]], showFoot: 'lastPage',
+      footStyles: {fillColor: [226, 232, 240], textColor: 20, fontStyle: 'bold'}
+    });
+    if(!R.dept){
+      y = doc.lastAutoTable.finalY + 9;
+      title('Summary by department', y);
+      doc.autoTable({
+        startY: y + 3, theme: 'grid', styles: {fontSize: 9, cellPadding: 2}, headStyles: {fillColor: NAVY}, margin: {left: M, right: M},
+        head: [['Department', R_('Areas'), R_('Total area (m²)')]],
+        body: [...rGroup(rows, a => a.department || 'Unassigned')].sort((a, b) => a[0].localeCompare(b[0])).map(([d, v]) => [d, R_(String(v.length)), R_(f2(rSum(v)))])
+      });
+    }
+
+    // ---- one section per floor: layout image + dimension table + total
+    const floors = FLOORS.filter(f => rInScope({floor: f}) && R.plans.some(p => p.floor === f) && (!R.dept || rows.some(a => a.floor === f)));
+    for(const f of floors){
+      const plan = R.plans.find(p => p.floor === f), fr = rows.filter(a => a.floor === f);
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42); doc.text('Floor ' + f + ' - ' + plan.name, M, 18);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
+      doc.text('Department: ' + dept + '   |   Areas: ' + fr.length + '   |   Total area: ' + f2(rSum(fr)) + ' m²   |   Report date: ' + rDate(), M, 24);
+      let top = 29;
+      try {
+        const im = await rLayoutImage(plan, R.areas.filter(a => a.floor === f));
+        const s = Math.min((PW - 2 * M) / im.w, 118 / im.h), w = im.w * s, h = im.h * s;
+        doc.addImage(im.data, 'JPEG', M, top, w, h);
+        doc.setDrawColor(203, 213, 225); doc.setLineWidth(.3); doc.rect(M, top, w, h);
+        top += h + 4;
+        if(R.dept){ doc.setFontSize(8); doc.text('Highlighted: department "' + R.dept + '". Other areas are shown as grey outlines.', M, top); top += 4; }
+      } catch(err) {
+        doc.setFontSize(9); doc.setTextColor(185, 28, 28); doc.text('Layout image unavailable: ' + err.message, M, top + 4); doc.setTextColor(90); top += 10;
+      }
+      doc.autoTable({
+        startY: top + 3, theme: 'grid', styles: {fontSize: 8.5, cellPadding: 1.8}, headStyles: {fillColor: NAVY}, margin: {left: M, right: M},
+        footStyles: {fillColor: [226, 232, 240], textColor: 20, fontStyle: 'bold'}, showFoot: 'lastPage',
+        head: [['Code', 'Name', 'Building', 'Department', R_('Length (m)'), R_('Width (m)'), R_('Area (m²)')]],
+        body: fr.map(a => [String(a.area_code), String(a.area_name), a.building || '-', a.department || '-', R_(f2(a.length_m)), R_(f2(a.width_m)), R_(f2(a.area_sqm))]),
+        foot: [[{content: 'TOTAL', colSpan: 6, styles: {halign: 'right'}}, R_(f2(rSum(fr)))]]
+      });
+    }
+
+    // ---- footer on every page
+    const pages = doc.getNumberOfPages();
+    for(let i = 1; i <= pages; i++){
+      doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120);
+      doc.text('Area Dimension Monitoring System - ' + rDate(), M, 289);
+      doc.text('Page ' + i + ' of ' + pages, PW - M, 289, {align: 'right'});
+    }
+    doc.save(rFile('pdf'));
+    toast('PDF report downloaded.');
+  } catch(err) {
+    toast('PDF failed: ' + err.message);
+  } finally {
+    R.busy = false; if(S.page === 'reports') render();
+  }
+}
+
 function loginHTML(){
   return '<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>' +
    '<input id="em" type="email" aria-label="Email" autocomplete="email" class="' + INP + '" placeholder="Email">' +
@@ -436,9 +650,9 @@ function render(){
   const app = $('app');
   if(SUPABASE_URL.includes('YOUR-PROJECT')){ app.innerHTML = '<p class="p-8 text-red-600">Please configure SUPABASE_URL and SUPABASE_ANON_KEY in config.js.</p>'; return; }
   if(!S.session){ app.innerHTML = loginHTML(); return bindLogin(); }
-  const nav = [['dashboard', 'Dashboard', 0], ['plan', 'Interactive Floor Plan', 0], ['directory', 'Area Directory', 0], ['manage', 'Manage Areas', 1], ['settings', 'Settings', 1]].filter(n => !n[2] || isAdmin());
+  const nav = [['dashboard', 'Dashboard', 0], ['plan', 'Interactive Floor Plan', 0], ['directory', 'Area Directory', 0], ['reports', 'Reports & Export', 0], ['manage', 'Manage Areas', 1], ['settings', 'Settings', 1]].filter(n => !n[2] || isAdmin());
   if((S.page === 'manage' || S.page === 'settings') && !isAdmin()) S.page = 'dashboard';
-  const body = S.page === 'dashboard' ? dashboardPage() : S.page === 'plan' ? planPage() : S.page === 'directory' ? directoryPage() : S.page === 'manage' ? manageHTML() : settingsHTML();
+  const body = S.page === 'dashboard' ? dashboardPage() : S.page === 'plan' ? planPage() : S.page === 'directory' ? directoryPage() : S.page === 'reports' ? reportsPage() : S.page === 'manage' ? manageHTML() : settingsHTML();
   
   app.innerHTML = '<div class="flex h-screen flex-col md:flex-row"><nav class="flex shrink-0 gap-1 overflow-x-auto bg-[#0f1f3d] p-2 text-slate-200 md:w-60 md:flex-col md:p-3">' +
     '<div class="hidden px-2 pb-3 pt-1 text-sm font-semibold text-white md:block">Area Dimension Monitoring</div>' +
@@ -451,14 +665,16 @@ function render(){
     if(k !== 'manage' && k !== 'settings' && S.viewPlan) S.viewPlan = null; 
     S.page = k; S.editId = null; S.form = {}; 
     if(k === 'manage' && !S.viewPlan) S.mFloor = null;      // always ask for the floor first
-    if(k === 'settings') loadPlans(); 
+    if(k === 'settings') loadPlans();
+    if(k === 'reports') loadReport();
     if(k === 'manage' && !S.mFloor) render();
-    else if(want() !== S.ctx) load();
+    else if(k !== 'reports' && want() !== S.ctx) load();
     else render();
   });
   $('out').onclick = () => sb.auth.signOut();
   if(S.page === 'dashboard' || S.page === 'plan'){ bindFloorTabs(); bindPlanPage(); }
   else if(S.page === 'directory'){ bindFloorTabs(); bindDirectory(); }
+  else if(S.page === 'reports') bindReports();
   else if(S.page === 'manage') S.mFloor ? bindManage() : bindFloorPick();
   else bindSettings();
 }
