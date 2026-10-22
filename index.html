@@ -73,24 +73,24 @@ function planHTML(draw){
   const W = S.size?.w || 1000, H = S.size?.h || 700;
   const gs = S.areas.filter(a => !(draw && a.id === S.editId)).map(a => {
     const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H, sel = a.id === S.sel, fs = Math.min(h * .4, w / Math.max(a.area_code.length, 1) * 1.6);
-    return `<g data-id="${a.id}" tabindex="0" role="button" aria-label="${esc(a.area_code+' '+a.area_name)}" class="area cursor-pointer" style="outline:none">
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${sel?'rgba(37,99,235,.22)':'rgba(15,23,42,.02)'}" stroke="${sel?'#2563eb':'#475569'}" stroke-width="${sel?3:1.5}" vector-effect="non-scaling-stroke"/>
-      ${S.labels && fs >= 6 ? `<text x="${x+w/2}" y="${y+h/2}" text-anchor="middle" dominant-baseline="central" font-size="${fs}" font-weight="600" fill="${sel?'#1d4ed8':'#0f172a'}" stroke="#fff" stroke-width="${fs/6}" paint-order="stroke" pointer-events="none">${esc(a.area_code)}</text>` : ''}</g>`; 
+    return '<g data-id="' + a.id + '" tabindex="0" role="button" aria-label="' + esc(a.area_code + ' ' + a.area_name) + '" class="area cursor-pointer" style="outline:none">' +
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + (sel ? 'rgba(37,99,235,.22)' : 'rgba(15,23,42,.02)') + '" stroke="' + (sel ? '#2563eb' : '#475569') + '" stroke-width="' + (sel ? 3 : 1.5) + '" vector-effect="non-scaling-stroke"/>' +
+      (S.labels && fs >= 6 ? '<text x="' + (x + w/2) + '" y="' + (y + h/2) + '" text-anchor="middle" dominant-baseline="central" font-size="' + fs + '" font-weight="600" fill="' + (sel ? '#1d4ed8' : '#0f172a') + '" stroke="#fff" stroke-width="' + (fs/6) + '" paint-order="stroke" pointer-events="none">' + esc(a.area_code) + '</text>' : '') + '</g>'; 
   }).join('');
-  return `<div id="pv" class="relative h-full min-h-[380px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style="touch-action:none;cursor:${draw?'crosshair':'grab'}">
-    <div class="absolute right-3 top-3 z-10 flex flex-col gap-1"><button data-z="in" aria-label="Zoom in" class="${GHO}">＋</button><button data-z="out" aria-label="Zoom out" class="${GHO}">－</button><button data-z="reset" aria-label="Reset view" class="${GHO}">⟲</button></div>
-    ${!S.plan ? '<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">No active floor plan. Administrators can upload one in Settings.</p>' : ''}
-    <div id="pload" class="absolute inset-0 animate-pulse bg-slate-200 ${S.url?'':'hidden'}"></div><p id="perr" class="absolute inset-0 hidden place-items-center p-6 text-center text-sm text-red-600">Failed to load floor plan image.</p>
-    <div class="grid h-full w-full place-items-center"><div id="pbox" class="relative" style="width:100%;aspect-ratio:${W}/${H}">
-      ${S.url ? `<img id="pimg" src="${esc(S.url)}" alt="Facility floor plan" draggable="false" class="absolute inset-0 h-full w-full select-none">` : ''}
-      <svg id="psvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="absolute inset-0 h-full w-full">${gs}<rect id="draft" class="hidden" fill="rgba(20,184,166,.25)" stroke="#0d9488" stroke-width="2" stroke-dasharray="8 4" vector-effect="non-scaling-stroke" pointer-events="none"/></svg></div></div>
-    <div id="ptip" class="pointer-events-none absolute bottom-3 left-3 hidden rounded-md bg-slate-900/90 px-2.5 py-1 text-xs text-white"></div></div>`;
+  return '<div id="pv" class="relative h-full min-h-[380px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style="touch-action:none;cursor:' + (draw ? 'crosshair' : 'grab') + '">' +
+    '<div class="absolute right-3 top-3 z-10 flex flex-col gap-1"><button data-z="in" aria-label="Zoom in" class="' + GHO + '">＋</button><button data-z="out" aria-label="Zoom out" class="' + GHO + '">－</button><button data-z="reset" aria-label="Reset view" class="' + GHO + '">⟲</button></div>' +
+    (!S.plan ? '<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">No active floor plan. Administrators can upload one in Settings.</p>' : '') +
+    '<div id="pload" class="absolute inset-0 animate-pulse bg-slate-200 ' + (S.url ? '' : 'hidden') + '"></div><p id="perr" class="absolute inset-0 hidden place-items-center p-6 text-center text-sm text-red-600">Failed to load floor plan image.</p>' +
+    '<div class="grid h-full w-full place-items-center"><div id="pbox" class="relative" style="width:100%;aspect-ratio:' + W + '/' + H + '">' +
+    (S.url ? '<img id="pimg" src="' + esc(S.url) + '" alt="Facility floor plan" draggable="false" class="absolute inset-0 h-full w-full select-none">' : '') +
+    '<svg id="psvg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" class="absolute inset-0 h-full w-full">' + gs + '<rect id="draft" class="hidden" fill="rgba(20,184,166,.25)" stroke="#0d9488" stroke-width="2" stroke-dasharray="8 4" vector-effect="non-scaling-stroke" pointer-events="none"/></svg></div></div>' +
+    '<div id="ptip" class="pointer-events-none absolute bottom-3 left-3 hidden rounded-md bg-slate-900/90 px-2.5 py-1 text-xs text-white"></div></div>';
 }
 
 function fit(){ 
-  const pv = $('pv'), box =$('pbox'); if(!pv || !box) return; 
+  const pv = $('pv'), box = $('pbox'); if(!pv || !box) return; 
   const W = S.size?.w || 1000, H = S.size?.h || 700, s = Math.min(pv.clientWidth / W, pv.clientHeight / H);
-  box.style.width = W * s + 'px'; box.style.height = H * s + 'px'; box.style.transform = `translate(${S.pan.x}px,${S.pan.y}px) scale(${S.z})`; 
+  box.style.width = W * s + 'px'; box.style.height = H * s + 'px'; box.style.transform = 'translate(' + S.pan.x + 'px,' + S.pan.y + 'px) scale(' + S.z + ')'; 
 }
 
 function drawDraft(r){ 
@@ -106,7 +106,7 @@ function bindPlan(draw){
   const img = $('pimg'); 
   if(img){ 
     img.onload = () => { $('pload').classList.add('hidden'); if(!S.size){ S.size = {w: img.naturalWidth, h: img.naturalHeight}; render(); } }; 
-    img.onerror = () => { $('pload').classList.add('hidden'); $('perr').classList.remove('hidden');$('perr').classList.add('grid'); }; 
+    img.onerror = () => { $('pload').classList.add('hidden'); $('perr').classList.remove('hidden'); $('perr').classList.add('grid'); }; 
   }
   pv.querySelectorAll('[data-z]').forEach(b => b.onclick = e => { 
     e.stopPropagation(); const k = b.dataset.z; 
@@ -134,37 +134,38 @@ const rectOf = s => ({x: Math.min(s.p0.x, s.p1.x), y: Math.min(s.p0.y, s.p1.y), 
 function detailsHTML(){
   const a = selArea(); 
   if(!a) return '<p class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Select an area on the floor plan to view its dimensions.</p>';
-  const row = (k, v) => `<div class="flex justify-between gap-3"><dt class="text-slate-500">${k}</dt><dd class="text-right">${esc(v||'—')}</dd></div>`;
-  return `<div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-teal-600">${esc(a.area_code)}</p><h3 class="text-lg font-semibold">${esc(a.area_name)}</h3>
-   <div class="my-3 rounded-lg bg-blue-50 p-3 text-center"><div class="text-3xl font-bold text-blue-700">${f2(a.area_sqm)} m²</div><div class="text-xs text-slate-500">${f2(a.length_m)} m × ${f2(a.width_m)} m</div></div>
-   <dl class="space-y-1.5 text-sm">${row('Building',a.building)}${row('Department',a.department)}${row('Length (m)',f2(a.length_m))}${row('Width (m)',f2(a.width_m))}${row('Total Area (m²)',f2(a.area_sqm))}${row('Description',a.description)}${row('Notes',a.notes)}${row('Last Updated',new Date(a.updated_at).toLocaleString())}</dl></div>`;
+  const row = (k, v) => '<div class="flex justify-between gap-3"><dt class="text-slate-500">' + k + '</dt><dd class="text-right">' + esc(v||'—') + '</dd></div>';
+  return '<div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-teal-600">' + esc(a.area_code) + '</p><h3 class="text-lg font-semibold">' + esc(a.area_name) + '</h3>' +
+   '<div class="my-3 rounded-lg bg-blue-50 p-3 text-center"><div class="text-3xl font-bold text-blue-700">' + f2(a.area_sqm) + ' m²</div><div class="text-xs text-slate-500">' + f2(a.length_m) + ' m × ' + f2(a.width_m) + ' m</div></div>' +
+   '<dl class="space-y-1.5 text-sm">' + row('Building', a.building) + row('Department', a.department) + row('Length (m)', f2(a.length_m)) + row('Width (m)', f2(a.width_m)) + row('Total Area (m²)', f2(a.area_sqm)) + row('Description', a.description) + row('Notes', a.notes) + row('Last Updated', new Date(a.updated_at).toLocaleString()) + '</dl></div>';
 }
 
 function planPage(){
   const hits = S.areas.filter(a => (a.area_code + a.area_name).toLowerCase().includes(S.q.toLowerCase()));
-  return `<div class="grid h-full gap-4 lg:grid-cols-[1fr_320px]"><div class="flex min-h-0 flex-col gap-3"><div class="flex flex-wrap gap-2">
-    <input id="q" class="${INP} min-w-40 flex-1" placeholder="Search code or name" value="${esc(S.q)}">
-    <select id="ddl" aria-label="Select area" class="${INP} w-56"><option value="">All areas</option>${hits.map(a => `<option value="${a.id}" ${a.id===S.sel?'selected':''}>${esc(a.area_code)} —${esc(a.area_name)}</option>`).join('')}</select>
-    <button id="lbl" class="${GHO}">${S.labels?'Hide labels':'Show all areas'}</button>${S.sel?`<button id="clr" class="${GHO}">Show full plan</button>`:''}</div>
-    <div class="min-h-[420px] flex-1">${planHTML(false)}</div></div>${detailsHTML()}</div>`;
+  return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_320px]"><div class="flex min-h-0 flex-col gap-3"><div class="flex flex-wrap gap-2">' +
+    '<input id="q" class="' + INP + ' min-w-40 flex-1" placeholder="Search code or name" value="' + esc(S.q) + '">' +
+    '<select id="ddl" aria-label="Select area" class="' + INP + ' w-56"><option value="">All areas</option>' + hits.map(a => '<option value="' + a.id + '" ' + (a.id===S.sel?'selected':'') + '>' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</option>').join('') + '</select>' +
+    '<button id="lbl" class="' + GHO + '">' + (S.labels ? 'Hide labels' : 'Show all areas') + '</button>' + (S.sel ? '<button id="clr" class="' + GHO + '">Show full plan</button>' : '') + '</div>' +
+    '<div class="min-h-[420px] flex-1">' + planHTML(false) + '</div></div>' + detailsHTML() + '</div>';
 }
 
 function bindPlanPage(){
   $('q').oninput = e => { 
     S.q = e.target.value; 
     const m = S.areas.filter(a => (a.area_code + a.area_name).toLowerCase().includes(S.q.toLowerCase()));
-    $('ddl').innerHTML = '<option value="">All areas</option>' + m.map(a => `<option value="${a.id}">${esc(a.area_code)} — ${esc(a.area_name)}</option>`).join(''); 
+    $('ddl').innerHTML = '<option value="">All areas</option>' + m.map(a => '<option value="' + a.id + '">' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</option>').join(''); 
     if(S.q && m.length === 1) select(m[0].id); 
   };
-  $('ddl').onchange = e => select(e.target.value \vert{}\vert{} null);$('lbl').onclick = () => { S.labels = !S.labels; render(); }; 
-  if($('clr'))$('clr').onclick = () => select(null);
+  $('ddl').onchange = e => select(e.target.value || null); 
+  $('lbl').onclick = () => { S.labels = !S.labels; render(); }; 
+  if($('clr')) $('clr').onclick = () => select(null);
   bindPlan(false);
 }
 
 function dashboardPage(){
   const t = S.areas.reduce((s, a) => s + Number(a.area_sqm), 0), big = S.areas.reduce((m, a) => !m || a.area_sqm > m.area_sqm ? a : m, null);
-  const c = [['Total Areas', S.areas.length], ['Total Floor Area (m²)', f2(t)], ['Largest Area', big ? `${big.area_code} · ${f2(big.area_sqm)} m²` : '—'], ['Areas with Complete Dimensions', `${S.areas.filter(a => a.length_m > 0 && a.width_m > 0).length} / ${S.areas.length}`]];
-  return `<div class="flex h-full flex-col gap-4"><div class="grid grid-cols-2 gap-3 xl:grid-cols-4">${c.map(([k, v]) => `<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">${k}</div><div class="mt-1 text-xl font-semibold">${S.loading?'…':esc(v)}</div></div>`).join('')}</div><div class="min-h-0 flex-1">${planPage()}</div></div>`;
+  const c = [['Total Areas', S.areas.length], ['Total Floor Area (m²)', f2(t)], ['Largest Area', big ? big.area_code + ' · ' + f2(big.area_sqm) + ' m²' : '—'], ['Areas with Complete Dimensions', S.areas.filter(a => a.length_m > 0 && a.width_m > 0).length + ' / ' + S.areas.length]];
+  return '<div class="flex h-full flex-col gap-4"><div class="grid grid-cols-2 gap-3 xl:grid-cols-4">' + c.map(([k, v]) => '<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">' + k + '</div><div class="mt-1 text-xl font-semibold">' + (S.loading ? '…' : esc(v)) + '</div></div>').join('') + '</div><div class="min-h-0 flex-1">' + planPage() + '</div></div>';
 }
 
 function dirRows(){
@@ -174,28 +175,31 @@ function dirRows(){
 
 function dirBody(){
   const rows = dirRows(), per = 15;
-  const tr = rows.slice(S.pg * per, S.pg * per + per).map(a => `<tr tabindex="0" data-id="${a.id}" class="cursor-pointer border-t border-slate-100 hover:bg-blue-50 ${a.id===S.sel?'bg-blue-50':''}">
-    <td class="px-3 py-2 font-medium">${esc(a.area_code)}</td><td class="px-3">${esc(a.area_name)}</td><td class="px-3">${esc(a.building)}</td><td class="px-3">${esc(a.department)}</td><td class="px-3">${f2(a.length_m)}</td><td class="px-3">${f2(a.width_m)}</td><td class="px-3 font-medium">${f2(a.area_sqm)}</td>
-    <td class="max-w-48 truncate px-3">${esc(a.description)}</td><td class="px-3 text-slate-500">${new Date(a.updated_at).toLocaleDateString()}</td><td class="px-3"><button data-view="${a.id}" class="text-blue-600 hover:underline">View on plan</button></td></tr>`).join('');
-  $('dbody').innerHTML = tr || `<tr><td colspan="10" class="p-8 text-center text-slate-500">${S.loading?'Loading…':'No areas found.'}</td></tr>`;
+  const tr = rows.slice(S.pg * per, S.pg * per + per).map(a => '<tr tabindex="0" data-id="' + a.id + '" class="cursor-pointer border-t border-slate-100 hover:bg-blue-55 ' + (a.id===S.sel?'bg-blue-50':'') + '">' +
+    '<td class="px-3 py-2 font-medium">' + esc(a.area_code) + '</td><td class="px-3">' + esc(a.area_name) + '</td><td class="px-3">' + esc(a.building) + '</td><td class="px-3">' + esc(a.department) + '</td><td class="px-3">' + f2(a.length_m) + '</td><td class="px-3">' + f2(a.width_m) + '</td><td class="px-3 font-medium">' + f2(a.area_sqm) + '</td>' +
+    '<td class="max-w-48 truncate px-3">' + esc(a.description) + '</td><td class="px-3 text-slate-500">' + new Date(a.updated_at).toLocaleDateString() + '</td><td class="px-3"><button data-view="' + a.id + '" class="text-blue-600 hover:underline">View on plan</button></td></tr>').join('');
+  $('dbody').innerHTML = tr || '<tr><td colspan="10" class="p-8 text-center text-slate-500">' + (S.loading ? 'Loading…' : 'No areas found.') + '</td></tr>';
   $('dinfo').textContent = rows.length + ' areas'; $('prev').disabled = S.pg === 0; $('next').disabled = (S.pg + 1) * per >= rows.length;
-  $('dbody').querySelectorAll('tr[data-id]').forEach(r => { r.onclick = () => { S.sel = r.dataset.id; dirBody(); }; r.onkeydown = e => e.key === 'Enter' && r.click(); });$('dbody').querySelectorAll('[data-view]').forEach(b => b.onclick = e => { e.stopPropagation(); S.page = 'plan'; select(b.dataset.view); });
+  $('dbody').querySelectorAll('tr[data-id]').forEach(r => { r.onclick = () => { S.sel = r.dataset.id; dirBody(); }; r.onkeydown = e => e.key === 'Enter' && r.click(); });
+  $('dbody').querySelectorAll('[data-view]').forEach(b => b.onclick = e => { e.stopPropagation(); S.page = 'plan'; select(b.dataset.view); });
 }
 
 function directoryPage(){
-  const u = k => [...new Set(S.areas.map(a => a[k]).filter(Boolean))], th = (k, l) => `<th data-k="${k}" class="cursor-pointer px-3 py-2 text-left">${l}${S.sort===k?(S.asc?' ↑':' ↓'):''}</th>`;
-  return `<div class="space-y-3"><div class="flex flex-wrap gap-2"><input id="dq" class="${INP} max-w-xs" placeholder="Search code or name" value="${esc(S.dq)}">
-    <select id="db" class="${INP} w-44"><option value="">All buildings</option>${u('building').map(x => `<option ${x===S.db?'selected':''}>${esc(x)}</option>`).join('')}</select>
-    <select id="dd" class="${INP} w-44"><option value="">All departments</option>${u('department').map(x => `<option ${x===S.dd?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
-    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm"><thead class="bg-slate-50 text-slate-600"><tr>${th('area_code','Code')}${th('area_name','Name')}<th class="px-3 py-2 text-left">Building</th><th class="px-3 py-2 text-left">Department</th>${th('length_m','Length (m)')}${th('width_m','Width (m)')}${th('area_sqm','Area (m²)')}<th class="px-3 py-2 text-left">Description</th><th class="px-3 py-2 text-left">Updated</th><th></th></tr></thead><tbody id="dbody"></tbody></table></div>
-    <div class="flex items-center justify-between text-sm text-slate-600"><span id="dinfo"></span><div class="flex gap-2"><button id="prev" class="${GHO}">Previous</button><button id="next" class="${GHO}">Next</button></div></div></div>`;
+  const u = k => [...new Set(S.areas.map(a => a[k]).filter(Boolean))], th = (k, l) => '<th data-k="' + k + '" class="cursor-pointer px-3 py-2 text-left">' + l + (S.sort === k ? (S.asc ? ' ↑' : ' ↓') : '') + '</th>';
+  return '<div class="space-y-3"><div class="flex flex-wrap gap-2"><input id="dq" class="' + INP + ' max-w-xs" placeholder="Search code or name" value="' + esc(S.dq) + '">' +
+    '<select id="db" class="' + INP + ' w-44"><option value="">All buildings</option>' + u('building').map(x => '<option ' + (x===S.db?'selected':'') + '>' + esc(x) + '</option>').join('') + '</select>' +
+    '<select id="dd" class="' + INP + ' w-44"><option value="">All departments</option>' + u('department').map(x => '<option ' + (x===S.dd?'selected':'') + '>' + esc(x) + '</option>').join('') + '</select></div>' +
+    '<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm"><thead class="bg-slate-50 text-slate-600"><tr>' + th('area_code', 'Code') + th('area_name', 'Name') + '<th class="px-3 py-2 text-left">Building</th><th class="px-3 py-2 text-left">Department</th>' + th('length_m', 'Length (m)') + th('width_m', 'Width (m)') + th('area_sqm', 'Area (m²)') + '<th class="px-3 py-2 text-left">Description</th><th class="px-3 py-2 text-left">Updated</th><th></th></tr></thead><tbody id="dbody"></tbody></table></div>' +
+    '<div class="flex items-center justify-between text-sm text-slate-600"><span id="dinfo"></span><div class="flex gap-2"><button id="prev" class="' + GHO + '">Previous</button><button id="next" class="' + GHO + '">Next</button></div></div></div>';
 }
 
 function bindDirectory(){
   dirBody();
   $('dq').oninput = e => { S.dq = e.target.value; S.pg = 0; dirBody(); }; 
-  $('db').onchange = e => { S.db = e.target.value; S.pg = 0; dirBody(); };$('dd').onchange = e => { S.dd = e.target.value; S.pg = 0; dirBody(); };
-  $('prev').onclick = () => { S.pg--; dirBody(); };$('next').onclick = () => { S.pg++; dirBody(); };
+  $('db').onchange = e => { S.db = e.target.value; S.pg = 0; dirBody(); }; 
+  $('dd').onchange = e => { S.dd = e.target.value; S.pg = 0; dirBody(); };
+  $('prev').onclick = () => { S.pg--; dirBody(); }; 
+  $('next').onclick = () => { S.pg++; dirBody(); };
   document.querySelectorAll('th[data-k]').forEach(h => h.onclick = () => { const k = h.dataset.k; S.sort === k ? S.asc = !S.asc : (S.sort = k, S.asc = true); render(); });
 }
 
@@ -217,21 +221,21 @@ function formVals(){
 }
 
 function manageHTML(){
-  const F = (k, l, t = 'text') => `<label class="block text-xs text-slate-600">${l}<input id="f_${k}" type="${t}" ${t==='number'?'step="any"':''} class="${INP} mt-0.5" value="${esc(S.form[k]??'')}"></label>`;
-  return `<div class="grid h-full gap-4 lg:grid-cols-[1fr_360px]"><div class="flex min-h-[420px] flex-col gap-2"><p class="text-sm text-slate-600">Drag over the floor plan${S.plan?` “${esc(S.plan.name)}”`:''} to draw a rectangle.</p><div class="min-h-0 flex-1">${planHTML(true)}</div></div>
-   <div class="max-h-full space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">${S.editId?'Edit area':'New area'}</h3><ul id="errs" class="hidden rounded-md bg-red-50 p-2 text-xs text-red-700"></ul>
-   <div class="grid grid-cols-2 gap-2">${F('area_code','Area code *')}${F('area_name','Area name *')}${F('building','Building')}${F('department','Department')}${F('length_m','Length (m) *','number')}${F('width_m','Width (m) *','number')}</div>
-   <p id="calc" class="text-sm text-teal-700"></p>${F('description','Description')}${F('notes','Notes')}
-   <p class="pt-1 text-xs font-medium">Rectangle position on plan (0–1)</p><div class="grid grid-cols-4 gap-2">${F('x','X','number')}${F('y','Y','number')}${F('w','Width','number')}${F('h','Height','number')}</div>
-   <div class="flex gap-2"><button id="save" class="${PRI}">${S.editId?'Save changes':'Create area'}</button>${S.editId?`<button id="cancel" class="${GHO}">Cancel</button>`:''}</div><hr>
-   <ul class="max-h-56 space-y-1 overflow-y-auto text-sm">${S.areas.map(a => `<li class="flex items-center justify-between rounded px-1 hover:bg-slate-50"><button data-edit="${a.id}" class="flex-1 py-1 text-left">${esc(a.area_code)} —${esc(a.area_name)}</button><button data-del="${a.id}" class="p-1 text-red-600">🗑</button></li>`).join('')||'<p class="text-slate-500 text-sm">No areas yet.</p>'}</ul></div></div>`;
+  const F = (k, l, t = 'text') => '<label class="block text-xs text-slate-600">' + l + '<input id="f_' + k + '" type="' + t + '" ' + (t==='number'?'step="any"':'') + ' class="' + INP + ' mt-0.5" value="' + esc(S.form[k]??'') + '"></label>';
+  return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_360px]"><div class="flex min-h-[420px] flex-col gap-2"><p class="text-sm text-slate-600">Drag over the floor plan ' + (S.plan ? '“' + esc(S.plan.name) + '”' : '') + ' to draw a rectangle.</p><div class="min-h-0 flex-1">' + planHTML(true) + '</div></div>' +
+   '<div class="max-h-full space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">' + (S.editId ? 'Edit area' : 'New area') + '</h3><ul id="errs" class="hidden rounded-md bg-red-50 p-2 text-xs text-red-700"></ul>' +
+   '<div class="grid grid-cols-2 gap-2">' + F('area_code', 'Area code *') + F('area_name', 'Area name *') + F('building', 'Building') + F('department', 'Department') + F('length_m', 'Length (m) *', 'number') + F('width_m', 'Width (m) *', 'number') + '</div>' +
+   '<p id="calc" class="text-sm text-teal-700"></p>' + F('description', 'Description') + F('notes', 'Notes') +
+   '<p class="pt-1 text-xs font-medium">Rectangle position on plan (0–1)</p><div class="grid grid-cols-4 gap-2">' + F('x', 'X', 'number') + F('y', 'Y', 'number') + F('w', 'Width', 'number') + F('h', 'Height', 'number') + '</div>' +
+   '<div class="flex gap-2"><button id="save" class="' + PRI + '">' + (S.editId ? 'Save changes' : 'Create area') + '</button>' + (S.editId ? '<button id="cancel" class="' + GHO + '">Cancel</button>' : '') + '</div><hr>' +
+   '<ul class="max-h-56 space-y-1 overflow-y-auto text-sm">' + S.areas.map(a => '<li class="flex items-center justify-between rounded px-1 hover:bg-slate-50"><button data-edit="' + a.id + '" class="flex-1 py-1 text-left">' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</button><button data-del="' + a.id + '" class="p-1 text-red-600">🗑</button></li>').join('') + '<li class="text-slate-500 text-sm ' + (S.areas.length ? 'hidden' : '') + '">No areas yet.</li></ul></div></div>';
 }
 
 function bindManage(){
   bindPlan(true);
   const live = () => { 
     const v = formVals(), l = parseFloat(v.length_m), w = parseFloat(v.width_m); 
-    $('calc').textContent = l > 0 && w > 0 ? `Area: ${f2(l*w)} m²` : '';
+    $('calc').textContent = l > 0 && w > 0 ? 'Area: ' + f2(l*w) + ' m²' : '';
     const r = {x: parseFloat(v.x), y: parseFloat(v.y), w: parseFloat(v.w), h: parseFloat(v.h)}; 
     drawDraft(Object.values(r).every(n => !isNaN(n)) ? r : null); 
   };
@@ -239,22 +243,23 @@ function bindManage(){
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => loadForm(S.areas.find(a => a.id === b.dataset.edit)));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { 
     const a = S.areas.find(x => x.id === b.dataset.del); 
-    if(!confirm(`Delete ${a.area_code} — ${a.area_name}?`)) return;
+    if(!confirm('Delete ' + a.area_code + ' — ' + a.area_name + '?')) return;
     const {error} = await sb.from('areas').delete().eq('id', a.id); 
     if(error) return toast(error.message); 
     toast('Area deleted'); S.sel = null; S.editId = null; S.form = {}; load(); 
   });
-  if($('cancel')) $('cancel').onclick = () => { S.editId = null; S.form = {}; render(); };$('save').onclick = async () => {
+  if($('cancel')) $('cancel').onclick = () => { S.editId = null; S.form = {}; render(); };
+  $('save').onclick = async () => {
     const v = formVals(), e = [], code = v.area_code.trim(), n = k => v[k] === '' ? NaN : Number(v[k]);
     if(!code) e.push('Area code is required.'); if(!v.area_name.trim()) e.push('Area name is required.');
     if(!(n('length_m') > 0)) e.push('Length must be greater than zero.'); if(!(n('width_m') > 0)) e.push('Width must be greater than zero.');
     const r = {x: n('x'), y: n('y'), w: n('w'), h: n('h')};
     if(Object.values(r).some(isNaN)) e.push('Draw a rectangle or fill coordinates.');
-    const ul = $('errs'); ul.innerHTML = e.map(x => `<li>${esc(x)}</li>`).join(''); ul.classList.toggle('hidden', !e.length); if(e.length || !S.plan) return;
+    const ul = $('errs'); ul.innerHTML = e.map(x => '<li>' + esc(x) + '</li>').join(''); ul.classList.toggle('hidden', !e.length); if(e.length || !S.plan) return;
     const row = { floor_plan_id: S.plan.id, area_code: code, area_name: v.area_name.trim(), building: v.building || null, department: v.department || null, length_m: n('length_m'), width_m: n('width_m'), description: v.description || null, notes: v.notes || null, x: +r.x.toFixed(6), y: +r.y.toFixed(6), w: +r.w.toFixed(6), h: +r.h.toFixed(6) };
     $('save').disabled = true;
     const { error } = S.editId ? await sb.from('areas').update(row).eq('id', S.editId) : await sb.from('areas').insert(row);
-    if(error){ $('save').disabled = false; ul.innerHTML = `<li>${esc(error.message)}</li>`; ul.classList.remove('hidden'); return; }
+    if(error){ $('save').disabled = false; ul.innerHTML = '<li>' + esc(error.message) + '</li>'; ul.classList.remove('hidden'); return; }
     toast(S.editId ? 'Area updated' : 'Area created'); S.editId = null; S.form = {}; load();
   };
 }
@@ -266,15 +271,16 @@ async function loadPlans(){
 }
 
 function settingsHTML(){
-  return `<div class="max-w-3xl space-y-4"><div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Upload Floor Plan</h3>
-   <input id="pname" class="${INP}" placeholder="Floor plan name"><input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="${PRI}">Upload Plan</button></div>
-   <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3>${S.plans.map(p => `<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">${esc(p.name)}${p.is_active?'<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>':''}</span>
-    ${p.is_active?'':`<button data-copy="${p.id}" class="${GHO}">Copy areas from active plan</button>`}<button data-rev="${p.id}" class="${GHO}">Review overlay</button>${p.is_active?'':`<button data-act="${p.id}" class="${PRI}">Activate</button><button data-rm="${p.id}" class="p-1 text-red-600">🗑</button>`}</div>`).join('')||'<p class="text-sm text-slate-500">No floor plans yet.</p>'}</div></div>`;
+  return '<div class="max-w-3xl space-y-4"><div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Upload Floor Plan</h3>' +
+   '<input id="pname" class="' + INP + '" placeholder="Floor plan name"><input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="' + PRI + '">Upload Plan</button></div>' +
+   '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3>' + S.plans.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
+    (p.is_active ? '' : '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet.</p></div></div>';
 }
 
 function bindSettings(){
   let file = null; 
-  $('pfile').onchange = e => { file = e.target.files[0] || null; const im = $('pprev'); if(file){ im.src = URL.createObjectURL(file); im.classList.remove('hidden'); } else im.classList.add('hidden'); };$('pup').onclick = async () => {
+  $('pfile').onchange = e => { file = e.target.files[0] || null; const im = $('pprev'); if(file){ im.src = URL.createObjectURL(file); im.classList.remove('hidden'); } else im.classList.add('hidden'); };
+  $('pup').onclick = async () => {
     const name = $('pname').value.trim(); 
     if(!file || !name) return toast('Please enter a name and select an image file.');
     $('pup').disabled = true;
@@ -288,7 +294,7 @@ function bindSettings(){
   const P = id => S.plans.find(p => p.id === id);
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { 
     const p = P(b.dataset.act); 
-    if(!confirm(`Set “${p.name}” as active?`)) return;
+    if(!confirm('Set as active?')) return;
     const {error} = await sb.rpc('set_active_floor_plan', {plan_id: p.id}); 
     if(error) return toast(error.message); 
     toast('Floor plan activated'); S.viewPlan = null; loadPlans(); load(); 
@@ -297,12 +303,12 @@ function bindSettings(){
     const src = S.plans.find(p => p.is_active); 
     if(!src) return toast('No active floor plan found.');
     const {data, error} = await sb.rpc('copy_areas', {src: src.id, dst: b.dataset.copy}); 
-    error ? toast(error.message) : toast(`${data} areas copied.`); 
+    error ? toast(error.message) : toast(data + ' areas copied.'); 
   });
   document.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => { S.viewPlan = b.dataset.rev; S.sel = null; S.page = 'manage'; load(); });
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { 
     const p = P(b.dataset.rm); 
-    if(!confirm(`Delete “${p.name}”?`)) return;
+    if(!confirm('Delete floor plan?')) return;
     const {error} = await sb.from('floor_plans').delete().eq('id', p.id); 
     if(error) return toast(error.message);
     await sb.storage.from('floor-plans').remove([p.storage_path]); loadPlans(); 
@@ -310,23 +316,24 @@ function bindSettings(){
 }
 
 function loginHTML(){
-  return `<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>
-   <input id="em" type="email" autocomplete="email" class="${INP}" placeholder="Email">
-   <input id="pw" type="password" autocomplete="current-password" class="${INP}" placeholder="Password">
-   <p id="lm" class="text-xs text-red-600"></p>
-   <div class="flex gap-2"><button id="li" class="${PRI}">Sign In</button><button id="su" class="${GHO}">Create Viewer Account</button></div></div></div>`;
+  return '<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>' +
+   '<input id="em" type="email" autocomplete="email" class="' + INP + '" placeholder="Email">' +
+   '<input id="pw" type="password" autocomplete="current-password" class="' + INP + '" placeholder="Password">' +
+   '<p id="lm" class="text-xs text-red-600"></p>' +
+   '<div class="flex gap-2"><button id="li" class="' + PRI + '">Sign In</button><button id="su" class="' + GHO + '">Create Viewer Account</button></div></div></div>';
 }
 
 function bindLogin(){
   const go = async su => { 
-    const emailEl = $('em'), passEl =$('pw');
+    const emailEl = $('em'), passEl = $('pw');
     if (!emailEl || !passEl) return;
     const c = {email: emailEl.value, password: passEl.value}; 
     const r = su ? await sb.auth.signUp(c) : await sb.auth.signInWithPassword(c); 
     $('lm').textContent = r.error?.message || (su ? 'Account created.' : ''); 
   };
   $('li').onclick = () => go(false); 
-  $('su').onclick = () => go(true);$('pw').onkeydown = e => { if(e.key === 'Enter') go(false); };
+  $('su').onclick = () => go(true); 
+  $('pw').onkeydown = e => { if(e.key === 'Enter') go(false); };
 }
 
 function render(){
@@ -337,11 +344,11 @@ function render(){
   if((S.page === 'manage' || S.page === 'settings') && !isAdmin()) S.page = 'dashboard';
   const body = S.page === 'dashboard' ? dashboardPage() : S.page === 'plan' ? planPage() : S.page === 'directory' ? directoryPage() : S.page === 'manage' ? manageHTML() : settingsHTML();
   
-  app.innerHTML = `<div class="flex h-screen flex-col md:flex-row"><nav class="flex shrink-0 gap-1 overflow-x-auto bg-[#0f1f3d] p-2 text-slate-200 md:w-60 md:flex-col md:p-3">
-    <div class="hidden px-2 pb-3 pt-1 text-sm font-semibold text-white md:block">Area Dimension Monitoring</div>
-    ${nav.map(([k, l]) => `<button data-nav="${k}" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm ${S.page===k?'bg-blue-600 text-white':'hover:bg-white/10'}">${l}</button>`).join('')}
-    <button id="out" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm hover:bg-white/10 md:mt-auto">Logout</button></nav>
-    <main class="min-h-0 flex-1 overflow-auto p-3 md:p-5">${S.viewPlan && isAdmin() && S.plan ? `<p class="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">Reviewing inactive floor plan “${esc(S.plan.name)}”.</p>` : ''}${body}</main></div>`;
+  app.innerHTML = '<div class="flex h-screen flex-col md:flex-row"><nav class="flex shrink-0 gap-1 overflow-x-auto bg-[#0f1f3d] p-2 text-slate-200 md:w-60 md:flex-col md:p-3">' +
+    '<div class="hidden px-2 pb-3 pt-1 text-sm font-semibold text-white md:block">Area Dimension Monitoring</div>' +
+    nav.map(([k, l]) => '<button data-nav="' + k + '" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm ' + (S.page===k?'bg-blue-600 text-white':'hover:bg-white/10') + '">' + l + '</button>').join('') +
+    '<button id="out" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm hover:bg-white/10 md:mt-auto">Logout</button></nav>' +
+    '<main class="min-h-0 flex-1 overflow-auto p-3 md:p-5">' + (S.viewPlan && isAdmin() && S.plan ? '<p class="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">Reviewing inactive floor plan.</p>' : '') + body + '</main></div>';
   
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { 
     const k = b.dataset.nav, wasRev = S.viewPlan; 
