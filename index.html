@@ -12,11 +12,16 @@
 <div id="app"></div>
 <script>
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const FLOORS = [1, 2, 3];
+const savedFloor = (() => { try { return Number(localStorage.getItem('floor')); } catch (e) { return 0; } })();
 const S = { 
   session: null, role: 'viewer', page: 'dashboard', areas: [], plan: null, viewPlan: null, 
   url: null, size: null, loading: true, sel: new URLSearchParams(location.search).get('area'),
   labels: true, z: 1, pan: {x: 0, y: 0}, q: '', dq: '', db: '', dd: '', sort: 'area_name', 
-  asc: true, pg: 0, editId: null, form: {}, plans: [] 
+  asc: true, pg: 0, editId: null, form: {}, plans: [],
+  floor: FLOORS.includes(savedFloor) ? savedFloor : 1,  // floor shown on viewer pages
+  mFloor: null,                                          // floor chosen in Manage Areas
+  ctx: null, tok: 0
 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -26,6 +31,9 @@ const BTN = 'rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 ';
 const PRI = BTN + 'bg-blue-600 text-white hover:bg-blue-700', GHO = BTN + 'border border-slate-300 bg-white hover:bg-slate-50';
 const isAdmin = () => S.role === 'admin';
 const selArea = () => S.areas.find(a => a.id === S.sel);
+const curFloor = () => S.page === 'manage' ? S.mFloor : S.floor;
+const want = () => S.viewPlan && isAdmin() ? 'p' + S.viewPlan : 'f' + curFloor();
+let RO = null, urlTimer = null;
 
 function toast(m){ 
   const t = document.createElement('div'); 
@@ -44,29 +52,67 @@ function select(id){
   render(); 
 }
 
+/* ---------- floor plan image URL: keep it fresh so it never expires on screen ---------- */
+async function refreshUrl(){
+  if (!S.plan) return null;
+  const { data } = await sb.storage.from('floor-plans').createSignedUrl(S.plan.storage_path, 3600);
+  if (data?.signedUrl) S.url = data.signedUrl;
+  return data?.signedUrl || null;
+}
+async function swapImg(){
+  const u = await refreshUrl(), i = $('pimg');
+  if (!u || !i) return;
+  const n = new Image(); n.onload = () => { i.src = u; }; n.src = u;
+}
+function keepUrlFresh(){ clearInterval(urlTimer); urlTimer = setInterval(swapImg, 40 * 60 * 1000); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.session && S.plan) swapImg(); });
+
 async function load(){
-  S.loading = true; render();
-  let q = sb.from('floor_plans').select('*');
-  const { data: p } = S.viewPlan && isAdmin() ? await q.eq('id', S.viewPlan).maybeSingle() : await q.eq('is_active', true).maybeSingle();
+  const tok = ++S.tok;
+  S.loading = true; S.ctx = want(); render();
+  const rev = S.viewPlan && isAdmin(), fl = curFloor();
+  let p = null;
+  if (rev) ({ data: p } = await sb.from('floor_plans').select('*').eq('id', S.viewPlan).maybeSingle());
+  else if (fl) ({ data: p } = await sb.from('floor_plans').select('*').eq('floor', fl).eq('is_active', true).maybeSingle());
+  if (tok !== S.tok) return;
   S.plan = p; S.size = p?.image_width && p?.image_height ? {w: p.image_width, h: p.image_height} : null;
   if (p) {
     const [a, s] = await Promise.all([ sb.from('areas').select('*').eq('floor_plan_id', p.id).order('area_code'), sb.storage.from('floor-plans').createSignedUrl(p.storage_path, 3600) ]);
+    if (tok !== S.tok) return;
     S.areas = a.data || []; S.url = s.data?.signedUrl || null; if (S.sel && !S.areas.some(x => x.id === S.sel)) S.sel = null;
-  } else { S.areas = []; S.url = null; }
+  } else { S.areas = []; S.url = null; S.sel = null; }
+  keepUrlFresh();
   S.loading = false; render();
 }
 
 async function init(){
   const { data } = await sb.auth.getSession(); S.session = data.session;
-  sb.auth.onAuthStateChange((_e, s) => { const was = !!S.session; S.session = s; if (!!s !== was) start(); });
+  // do not call Supabase inside this callback directly (can deadlock) -> defer
+  sb.auth.onAuthStateChange((_e, s) => { const was = !!S.session; S.session = s; if (!!s !== was) setTimeout(start, 0); });
   start();
 }
 
 async function start(){
-  if (!S.session) return render();
+  if (!S.session) { S.ctx = null; return render(); }
   const { data } = await sb.from('profiles').select('role').eq('id', S.session.user.id).maybeSingle(); 
   S.role = data?.role || 'viewer';
   load();
+}
+
+/* ---------- floor tabs (viewer pages) ---------- */
+function floorTabs(){
+  return '<div class="flex flex-wrap items-center gap-2" role="tablist" aria-label="Select floor">' + FLOORS.map(n =>
+    '<button role="tab" aria-selected="' + (S.floor === n) + '" data-floor="' + n + '" class="rounded-md px-3 py-1.5 text-sm font-medium ' + (S.floor === n ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white hover:bg-slate-50') + '">Floor ' + n + '</button>').join('') + '</div>';
+}
+
+function bindFloorTabs(){
+  document.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => {
+    const n = Number(b.dataset.floor); if (n === S.floor) return;
+    S.floor = n; try { localStorage.setItem('floor', n); } catch (e) {}
+    S.sel = null; S.q = ''; S.dq = ''; S.db = ''; S.dd = ''; S.pg = 0; S.z = 1; S.pan = {x: 0, y: 0};
+    const u = new URL(location.href); u.searchParams.delete('area'); history.replaceState(null, '', u);
+    load();
+  });
 }
 
 function planHTML(draw){
@@ -79,7 +125,7 @@ function planHTML(draw){
   }).join('');
   return '<div id="pv" class="relative h-full min-h-[380px] overflow-hidden rounded-xl border border-slate-200 bg-slate-100" style="touch-action:none;cursor:' + (draw ? 'crosshair' : 'grab') + '">' +
     '<div class="absolute right-3 top-3 z-10 flex flex-col gap-1"><button data-z="in" aria-label="Zoom in" class="' + GHO + '">＋</button><button data-z="out" aria-label="Zoom out" class="' + GHO + '">－</button><button data-z="reset" aria-label="Reset view" class="' + GHO + '">⟲</button></div>' +
-    (!S.plan ? '<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">No active floor plan. Administrators can upload one in Settings.</p>' : '') +
+    (!S.plan && !S.loading ? '<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-slate-500">No active floor plan for Floor ' + esc(curFloor() ?? '') + '. Administrators can upload and activate one in Settings.</p>' : '') +
     '<div id="pload" class="absolute inset-0 animate-pulse bg-slate-200 ' + (S.url ? '' : 'hidden') + '"></div><p id="perr" class="absolute inset-0 hidden place-items-center p-6 text-center text-sm text-red-600">Failed to load floor plan image.</p>' +
     '<div class="grid h-full w-full place-items-center"><div id="pbox" class="relative" style="width:100%;aspect-ratio:' + W + '/' + H + '">' +
     (S.url ? '<img id="pimg" src="' + esc(S.url) + '" alt="Facility floor plan" draggable="false" class="absolute inset-0 h-full w-full select-none">' : '') +
@@ -102,17 +148,23 @@ function drawDraft(r){
 
 function bindPlan(draw){
   const pv = $('pv'); if(!pv) return; fit();
-  new ResizeObserver(fit).observe(pv);
+  RO?.disconnect(); RO = new ResizeObserver(fit); RO.observe(pv);
   const img = $('pimg'); 
   if(img){ 
     img.onload = () => { $('pload').classList.add('hidden'); if(!S.size){ S.size = {w: img.naturalWidth, h: img.naturalHeight}; render(); } }; 
-    img.onerror = () => { $('pload').classList.add('hidden'); $('perr').classList.remove('hidden'); $('perr').classList.add('grid'); }; 
+    img.onerror = async () => {
+      if(!img.dataset.retried){ img.dataset.retried = '1'; const u = await refreshUrl(); if(u){ img.src = u; return; } }
+      $('pload').classList.add('hidden'); $('perr').classList.remove('hidden'); $('perr').classList.add('grid'); 
+    }; 
   }
-  pv.querySelectorAll('[data-z]').forEach(b => b.onclick = e => { 
-    e.stopPropagation(); const k = b.dataset.z; 
-    if(k === 'reset'){ S.z = 1; S.pan = {x: 0, y: 0}; } 
-    else S.z = Math.min(6, Math.max(.5, S.z * (k === 'in' ? 1.25 : 1 / 1.25))); 
-    fit(); 
+  pv.querySelectorAll('[data-z]').forEach(b => {
+    b.onpointerdown = e => e.stopPropagation();   // otherwise pointer capture on #pv swallows the click
+    b.onclick = e => { 
+      e.stopPropagation(); const k = b.dataset.z; 
+      if(k === 'reset'){ S.z = 1; S.pan = {x: 0, y: 0}; } 
+      else S.z = Math.min(6, Math.max(.5, S.z * (k === 'in' ? 1.25 : 1 / 1.25))); 
+      fit(); 
+    };
   });
   pv.querySelectorAll('.area').forEach(g => {
     const a = S.areas.find(x => x.id === g.dataset.id), tip = $('ptip');
@@ -135,12 +187,12 @@ function detailsHTML(){
   const a = selArea(); 
   if(!a) return '<p class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">Select an area on the floor plan to view its dimensions.</p>';
   const row = (k, v) => '<div class="flex justify-between gap-3"><dt class="text-slate-500">' + k + '</dt><dd class="text-right">' + esc(v||'—') + '</dd></div>';
-  return '<div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-teal-600">' + esc(a.area_code) + '</p><h3 class="text-lg font-semibold">' + esc(a.area_name) + '</h3>' +
+  return '<div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm"><p class="text-xs font-semibold text-teal-600">' + esc(a.area_code) + ' · Floor ' + esc(S.plan?.floor ?? S.floor) + '</p><h3 class="text-lg font-semibold">' + esc(a.area_name) + '</h3>' +
    '<div class="my-3 rounded-lg bg-blue-50 p-3 text-center"><div class="text-3xl font-bold text-blue-700">' + f2(a.area_sqm) + ' m²</div><div class="text-xs text-slate-500">' + f2(a.length_m) + ' m × ' + f2(a.width_m) + ' m</div></div>' +
    '<dl class="space-y-1.5 text-sm">' + row('Building', a.building) + row('Department', a.department) + row('Length (m)', f2(a.length_m)) + row('Width (m)', f2(a.width_m)) + row('Total Area (m²)', f2(a.area_sqm)) + row('Description', a.description) + row('Notes', a.notes) + row('Last Updated', new Date(a.updated_at).toLocaleString()) + '</dl></div>';
 }
 
-function planPage(){
+function planGrid(){
   const hits = S.areas.filter(a => (a.area_code + a.area_name).toLowerCase().includes(S.q.toLowerCase()));
   return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_320px]"><div class="flex min-h-0 flex-col gap-3"><div class="flex flex-wrap gap-2">' +
     '<input id="q" class="' + INP + ' min-w-40 flex-1" placeholder="Search code or name" value="' + esc(S.q) + '">' +
@@ -149,12 +201,19 @@ function planPage(){
     '<div class="min-h-[420px] flex-1">' + planHTML(false) + '</div></div>' + detailsHTML() + '</div>';
 }
 
+function planPage(){
+  return '<div class="flex h-full flex-col gap-3">' + floorTabs() + '<div class="min-h-0 flex-1">' + planGrid() + '</div></div>';
+}
+
 function bindPlanPage(){
   $('q').oninput = e => { 
     S.q = e.target.value; 
     const m = S.areas.filter(a => (a.area_code + a.area_name).toLowerCase().includes(S.q.toLowerCase()));
     $('ddl').innerHTML = '<option value="">All areas</option>' + m.map(a => '<option value="' + a.id + '">' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</option>').join(''); 
-    if(S.q && m.length === 1) select(m[0].id); 
+    if(S.q && m.length === 1){ 
+      select(m[0].id);
+      const i = $('q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length);   // keep typing after re-render
+    }
   };
   $('ddl').onchange = e => select(e.target.value || null); 
   $('lbl').onclick = () => { S.labels = !S.labels; render(); }; 
@@ -165,28 +224,33 @@ function bindPlanPage(){
 function dashboardPage(){
   const t = S.areas.reduce((s, a) => s + Number(a.area_sqm), 0), big = S.areas.reduce((m, a) => !m || a.area_sqm > m.area_sqm ? a : m, null);
   const c = [['Total Areas', S.areas.length], ['Total Floor Area (m²)', f2(t)], ['Largest Area', big ? big.area_code + ' · ' + f2(big.area_sqm) + ' m²' : '—'], ['Areas with Complete Dimensions', S.areas.filter(a => a.length_m > 0 && a.width_m > 0).length + ' / ' + S.areas.length]];
-  return '<div class="flex h-full flex-col gap-4"><div class="grid grid-cols-2 gap-3 xl:grid-cols-4">' + c.map(([k, v]) => '<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">' + k + '</div><div class="mt-1 text-xl font-semibold">' + (S.loading ? '…' : esc(v)) + '</div></div>').join('') + '</div><div class="min-h-0 flex-1">' + planPage() + '</div></div>';
+  return '<div class="flex h-full flex-col gap-4">' + floorTabs() + '<div class="grid grid-cols-2 gap-3 xl:grid-cols-4">' + c.map(([k, v]) => '<div class="rounded-xl border border-slate-200 bg-white p-4"><div class="text-xs text-slate-500">' + k + '</div><div class="mt-1 text-xl font-semibold">' + (S.loading ? '…' : esc(v)) + '</div></div>').join('') + '</div><div class="min-h-0 flex-1">' + planGrid() + '</div></div>';
 }
 
 function dirRows(){
   return S.areas.filter(a => (!S.dq || (a.area_code + a.area_name).toLowerCase().includes(S.dq.toLowerCase())) && (!S.db || a.building === S.db) && (!S.dd || a.department === S.dd))
-    .sort((x, y) => { const A = x[S.sort], B = y[S.sort]; return (A > B ? 1 : A < B ? -1 : 0) * (S.asc ? 1 : -1); });
+    .sort((x, y) => { 
+      const A = x[S.sort], B = y[S.sort];
+      const c = typeof A === 'number' && typeof B === 'number' ? A - B : String(A ?? '').localeCompare(String(B ?? ''), undefined, {numeric: true});
+      return c * (S.asc ? 1 : -1); 
+    });
 }
 
 function dirBody(){
   const rows = dirRows(), per = 15;
+  const last = Math.max(0, Math.ceil(rows.length / per) - 1); if(S.pg > last) S.pg = last;
   const tr = rows.slice(S.pg * per, S.pg * per + per).map(a => '<tr tabindex="0" data-id="' + a.id + '" class="cursor-pointer border-t border-slate-100 hover:bg-blue-50 ' + (a.id===S.sel?'bg-blue-50':'') + '">' +
     '<td class="px-3 py-2 font-medium">' + esc(a.area_code) + '</td><td class="px-3">' + esc(a.area_name) + '</td><td class="px-3">' + esc(a.building) + '</td><td class="px-3">' + esc(a.department) + '</td><td class="px-3">' + f2(a.length_m) + '</td><td class="px-3">' + f2(a.width_m) + '</td><td class="px-3 font-medium">' + f2(a.area_sqm) + '</td>' +
     '<td class="max-w-48 truncate px-3">' + esc(a.description) + '</td><td class="px-3 text-slate-500">' + new Date(a.updated_at).toLocaleDateString() + '</td><td class="px-3"><button data-view="' + a.id + '" class="text-blue-600 hover:underline">View on plan</button></td></tr>').join('');
   $('dbody').innerHTML = tr || '<tr><td colspan="10" class="p-8 text-center text-slate-500">' + (S.loading ? 'Loading…' : 'No areas found.') + '</td></tr>';
-  $('dinfo').textContent = rows.length + ' areas'; $('prev').disabled = S.pg === 0; $('next').disabled = (S.pg + 1) * per >= rows.length;
+  $('dinfo').textContent = rows.length + ' areas · Floor ' + S.floor; $('prev').disabled = S.pg === 0; $('next').disabled = (S.pg + 1) * per >= rows.length;
   $('dbody').querySelectorAll('tr[data-id]').forEach(r => { r.onclick = () => { S.sel = r.dataset.id; dirBody(); }; r.onkeydown = e => e.key === 'Enter' && r.click(); });
   $('dbody').querySelectorAll('[data-view]').forEach(b => b.onclick = e => { e.stopPropagation(); S.page = 'plan'; select(b.dataset.view); });
 }
 
 function directoryPage(){
   const u = k => [...new Set(S.areas.map(a => a[k]).filter(Boolean))], th = (k, l) => '<th data-k="' + k + '" class="cursor-pointer px-3 py-2 text-left">' + l + (S.sort === k ? (S.asc ? ' ↑' : ' ↓') : '') + '</th>';
-  return '<div class="space-y-3"><div class="flex flex-wrap gap-2"><input id="dq" class="' + INP + ' max-w-xs" placeholder="Search code or name" value="' + esc(S.dq) + '">' +
+  return '<div class="space-y-3">' + floorTabs() + '<div class="flex flex-wrap gap-2"><input id="dq" class="' + INP + ' max-w-xs" placeholder="Search code or name" value="' + esc(S.dq) + '">' +
     '<select id="db" class="' + INP + ' w-44"><option value="">All buildings</option>' + u('building').map(x => '<option ' + (x===S.db?'selected':'') + '>' + esc(x) + '</option>').join('') + '</select>' +
     '<select id="dd" class="' + INP + ' w-44"><option value="">All departments</option>' + u('department').map(x => '<option ' + (x===S.dd?'selected':'') + '>' + esc(x) + '</option>').join('') + '</select></div>' +
     '<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-sm"><thead class="bg-slate-50 text-slate-600"><tr>' + th('area_code', 'Code') + th('area_name', 'Name') + '<th class="px-3 py-2 text-left">Building</th><th class="px-3 py-2 text-left">Department</th>' + th('length_m', 'Length (m)') + th('width_m', 'Width (m)') + th('area_sqm', 'Area (m²)') + '<th class="px-3 py-2 text-left">Description</th><th class="px-3 py-2 text-left">Updated</th><th></th></tr></thead><tbody id="dbody"></tbody></table></div>' +
@@ -203,6 +267,7 @@ function bindDirectory(){
   document.querySelectorAll('th[data-k]').forEach(h => h.onclick = () => { const k = h.dataset.k; S.sort === k ? S.asc = !S.asc : (S.sort = k, S.asc = true); render(); });
 }
 
+/* ---------- Manage Areas: choose floor first ---------- */
 const FIELDS = ['area_code', 'area_name', 'building', 'department', 'length_m', 'width_m', 'description', 'notes', 'x', 'y', 'w', 'h'];
 
 function loadForm(a){ 
@@ -220,19 +285,34 @@ function formVals(){
   const v = {}; FIELDS.forEach(k => v[k] = $('f_' + k).value); return v; 
 }
 
+function floorPickHTML(){
+  return '<div class="mx-auto max-w-2xl space-y-4"><div><h2 class="text-lg font-semibold">Manage Areas</h2><p class="text-sm text-slate-600">Choose the floor you want to edit. The floor plan of that floor will be loaded.</p></div>' +
+    '<div class="grid gap-3 sm:grid-cols-3">' + FLOORS.map(n => '<button data-mf="' + n + '" class="rounded-xl border border-slate-200 bg-white p-6 text-center hover:border-blue-500 hover:bg-blue-50"><div class="text-4xl font-bold text-blue-700">' + n + '</div><div class="mt-1 text-sm text-slate-600">Floor ' + n + '</div></button>').join('') + '</div></div>';
+}
+
+function bindFloorPick(){
+  document.querySelectorAll('[data-mf]').forEach(b => b.onclick = () => {
+    S.mFloor = Number(b.dataset.mf); S.sel = null; S.editId = null; S.form = {}; S.z = 1; S.pan = {x: 0, y: 0};
+    load();
+  });
+}
+
 function manageHTML(){
+  if(!S.mFloor) return floorPickHTML();
   const F = (k, l, t = 'text') => '<label class="block text-xs text-slate-600">' + l + '<input id="f_' + k + '" type="' + t + '" ' + (t==='number'?'step="any"':'') + ' class="' + INP + ' mt-0.5" value="' + esc(S.form[k]??'') + '"></label>';
-  return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_360px]"><div class="flex min-h-[420px] flex-col gap-2"><p class="text-sm text-slate-600">Drag over the floor plan ' + (S.plan ? '“' + esc(S.plan.name) + '”' : '') + ' to draw a rectangle.</p><div class="min-h-0 flex-1">' + planHTML(true) + '</div></div>' +
-   '<div class="max-h-full space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">' + (S.editId ? 'Edit area' : 'New area') + '</h3><ul id="errs" class="hidden rounded-md bg-red-50 p-2 text-xs text-red-700"></ul>' +
+  return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_360px]"><div class="flex min-h-[420px] flex-col gap-2"><div class="flex flex-wrap items-center gap-2"><span class="rounded bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">Floor ' + S.mFloor + '</span><button id="chfl" class="text-xs text-blue-600 hover:underline">Change floor</button>' +
+   '<p class="text-sm text-slate-600">Drag over the floor plan ' + (S.plan ? '“' + esc(S.plan.name) + '”' : '') + ' to draw a rectangle.</p></div><div class="min-h-0 flex-1">' + planHTML(true) + '</div></div>' +
+   '<div class="max-h-full space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">' + (S.editId ? 'Edit area' : 'New area') + ' · Floor ' + S.mFloor + '</h3><ul id="errs" class="hidden rounded-md bg-red-50 p-2 text-xs text-red-700"></ul>' +
    '<div class="grid grid-cols-2 gap-2">' + F('area_code', 'Area code *') + F('area_name', 'Area name *') + F('building', 'Building') + F('department', 'Department') + F('length_m', 'Length (m) *', 'number') + F('width_m', 'Width (m) *', 'number') + '</div>' +
    '<p id="calc" class="text-sm text-teal-700"></p>' + F('description', 'Description') + F('notes', 'Notes') +
    '<p class="pt-1 text-xs font-medium">Rectangle position on plan (0–1)</p><div class="grid grid-cols-4 gap-2">' + F('x', 'X', 'number') + F('y', 'Y', 'number') + F('w', 'Width', 'number') + F('h', 'Height', 'number') + '</div>' +
    '<div class="flex gap-2"><button id="save" class="' + PRI + '">' + (S.editId ? 'Save changes' : 'Create area') + '</button>' + (S.editId ? '<button id="cancel" class="' + GHO + '">Cancel</button>' : '') + '</div><hr>' +
-   '<ul class="max-h-56 space-y-1 overflow-y-auto text-sm">' + S.areas.map(a => '<li class="flex items-center justify-between rounded px-1 hover:bg-slate-50"><button data-edit="' + a.id + '" class="flex-1 py-1 text-left">' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</button><button data-del="' + a.id + '" class="p-1 text-red-600">🗑</button></li>').join('') + '<li class="text-slate-500 text-sm ' + (S.areas.length ? 'hidden' : '') + '">No areas yet.</li></ul></div></div>';
+   '<ul class="max-h-56 space-y-1 overflow-y-auto text-sm">' + S.areas.map(a => '<li class="flex items-center justify-between rounded px-1 hover:bg-slate-50"><button data-edit="' + a.id + '" class="flex-1 py-1 text-left">' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</button><button data-del="' + a.id + '" aria-label="Delete ' + esc(a.area_code) + '" class="p-1 text-red-600">🗑</button></li>').join('') + '<li class="text-slate-500 text-sm ' + (S.areas.length ? 'hidden' : '') + '">No areas yet.</li></ul></div></div>';
 }
 
 function bindManage(){
   bindPlan(true);
+  $('chfl').onclick = () => { S.mFloor = null; S.viewPlan = null; S.editId = null; S.form = {}; S.sel = null; render(); };
   const live = () => { 
     const v = formVals(), l = parseFloat(v.length_m), w = parseFloat(v.width_m); 
     $('calc').textContent = l > 0 && w > 0 ? 'Area: ' + f2(l*w) + ' m²' : '';
@@ -251,11 +331,12 @@ function bindManage(){
   if($('cancel')) $('cancel').onclick = () => { S.editId = null; S.form = {}; render(); };
   $('save').onclick = async () => {
     const v = formVals(), e = [], code = v.area_code.trim(), n = k => v[k] === '' ? NaN : Number(v[k]);
+    if(!S.plan) e.push('Floor ' + S.mFloor + ' has no floor plan yet. Upload and activate one in Settings.');
     if(!code) e.push('Area code is required.'); if(!v.area_name.trim()) e.push('Area name is required.');
     if(!(n('length_m') > 0)) e.push('Length must be greater than zero.'); if(!(n('width_m') > 0)) e.push('Width must be greater than zero.');
     const r = {x: n('x'), y: n('y'), w: n('w'), h: n('h')};
     if(Object.values(r).some(isNaN)) e.push('Draw a rectangle or fill coordinates.');
-    const ul = $('errs'); ul.innerHTML = e.map(x => '<li>' + esc(x) + '</li>').join(''); ul.classList.toggle('hidden', !e.length); if(e.length || !S.plan) return;
+    const ul = $('errs'); ul.innerHTML = e.map(x => '<li>' + esc(x) + '</li>').join(''); ul.classList.toggle('hidden', !e.length); if(e.length) return;
     const row = { floor_plan_id: S.plan.id, area_code: code, area_name: v.area_name.trim(), building: v.building || null, department: v.department || null, length_m: n('length_m'), width_m: n('width_m'), description: v.description || null, notes: v.notes || null, x: +r.x.toFixed(6), y: +r.y.toFixed(6), w: +r.w.toFixed(6), h: +r.h.toFixed(6) };
     $('save').disabled = true;
     const { error } = S.editId ? await sb.from('areas').update(row).eq('id', S.editId) : await sb.from('areas').insert(row);
@@ -264,6 +345,7 @@ function bindManage(){
   };
 }
 
+/* ---------- Settings: floor plans per floor ---------- */
 async function loadPlans(){ 
   const {data} = await sb.from('floor_plans').select('*').order('created_at', {ascending: false}); 
   S.plans = data || []; 
@@ -271,41 +353,55 @@ async function loadPlans(){
 }
 
 function settingsHTML(){
+  const ps = [...S.plans].sort((a, b) => (a.floor - b.floor) || (a.is_active ? -1 : 1));
   return '<div class="max-w-3xl space-y-4"><div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Upload Floor Plan</h3>' +
-   '<input id="pname" class="' + INP + '" placeholder="Floor plan name"><input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="' + PRI + '">Upload Plan</button></div>' +
-   '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3>' + S.plans.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
-    (p.is_active ? '' : '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet[cite: 2].</p></div></div>';
+   '<input id="pname" class="' + INP + '" placeholder="Floor plan name">' +
+   '<label class="block text-xs text-slate-600">Floor<select id="pfloor" class="' + INP + ' mt-0.5 w-40">' + FLOORS.map(n => '<option value="' + n + '">Floor ' + n + '</option>').join('') + '</select></label>' +
+   '<input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="' + PRI + '">Upload Plan</button></div>' +
+   '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3><p class="text-xs text-slate-500">Each floor has its own active floor plan.</p>' + ps.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' <span class="ml-1 rounded bg-slate-100 px-1.5 text-xs text-slate-700">Floor ' + esc(p.floor) + '</span> ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
+    (p.is_active ? '' : '<select data-pf="' + p.id + '" aria-label="Change floor" class="' + INP + ' w-24">' + FLOORS.map(n => '<option value="' + n + '" ' + (n === p.floor ? 'selected' : '') + '>Floor ' + n + '</option>').join('') + '</select>' +
+      '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan (Floor ' + esc(p.floor) + ')</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" aria-label="Delete floor plan" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet.</p></div></div>';
 }
 
 function bindSettings(){
   let file = null; 
-  $('pfile').onchange = e => { file = e.target.files[0] || null; const im = $('pprev'); if(file){ im.src = URL.createObjectURL(file); im.classList.remove('hidden'); } else im.classList.add('hidden'); };
+  $('pfile').onchange = e => { 
+    file = e.target.files[0] || null; const im = $('pprev'); 
+    if(im.dataset.obj) URL.revokeObjectURL(im.dataset.obj);
+    if(file){ const u = URL.createObjectURL(file); im.dataset.obj = u; im.src = u; im.classList.remove('hidden'); } else im.classList.add('hidden'); 
+  };
   $('pup').onclick = async () => {
-    const name = $('pname').value.trim(); 
+    const name = $('pname').value.trim(), floor = Number($('pfloor').value); 
     if(!file || !name) return toast('Please enter a name and select an image file.');
+    if(!FLOORS.includes(floor)) return toast('Please choose a floor.');
     $('pup').disabled = true;
     const dim = await new Promise(r => { const i = new Image(); i.onload = () => r({w: i.naturalWidth, h: i.naturalHeight}); i.src = $('pprev').src; });
     const path = crypto.randomUUID() + '-' + file.name.replace(/[^\w.-]/g, '_'), up = await sb.storage.from('floor-plans').upload(path, file);
     if(up.error){ $('pup').disabled = false; return toast(up.error.message); }
-    const {error} = await sb.from('floor_plans').insert({name, storage_path: path, image_width: dim.w, image_height: dim.h, is_active: false});
+    const {error} = await sb.from('floor_plans').insert({name, floor, storage_path: path, image_width: dim.w, image_height: dim.h, is_active: false});
     if(error){ await sb.storage.from('floor-plans').remove([path]); $('pup').disabled = false; return toast(error.message); }
-    toast('Uploaded successfully.'); loadPlans();
+    toast('Uploaded to Floor ' + floor + '. Activate it to use it.'); loadPlans();
   };
   const P = id => S.plans.find(p => p.id === id);
+  document.querySelectorAll('[data-pf]').forEach(s => s.onchange = async () => {
+    const {error} = await sb.from('floor_plans').update({floor: Number(s.value)}).eq('id', s.dataset.pf);
+    if(error) toast(error.message); else toast('Floor updated');
+    loadPlans();
+  });
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { 
     const p = P(b.dataset.act); 
-    if(!confirm('Set as active?')) return;
+    if(!confirm('Set "' + p.name + '" as the active plan for Floor ' + p.floor + '?')) return;
     const {error} = await sb.rpc('set_active_floor_plan', {plan_id: p.id}); 
     if(error) return toast(error.message); 
     toast('Floor plan activated'); S.viewPlan = null; loadPlans(); load(); 
   });
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { 
-    const src = S.plans.find(p => p.is_active); 
-    if(!src) return toast('No active floor plan found.');
-    const {data, error} = await sb.rpc('copy_areas', {src: src.id, dst: b.dataset.copy}); 
+    const dst = P(b.dataset.copy), src = S.plans.find(p => p.is_active && p.floor === dst.floor); 
+    if(!src) return toast('No active floor plan found for Floor ' + dst.floor + '.');
+    const {data, error} = await sb.rpc('copy_areas', {src: src.id, dst: dst.id}); 
     error ? toast(error.message) : toast(data + ' areas copied.'); 
   });
-  document.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => { S.viewPlan = b.dataset.rev; S.sel = null; S.page = 'manage'; load(); });
+  document.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => { const p = P(b.dataset.rev); S.viewPlan = p.id; S.mFloor = p.floor; S.sel = null; S.page = 'manage'; load(); });
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { 
     const p = P(b.dataset.rm); 
     if(!confirm('Delete floor plan?')) return;
@@ -317,8 +413,8 @@ function bindSettings(){
 
 function loginHTML(){
   return '<div class="grid min-h-screen place-items-center bg-slate-100 p-4"><div class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-6"><h1 class="text-lg font-semibold">Area Dimension Monitoring System</h1>' +
-   '<input id="em" type="email" autocomplete="email" class="' + INP + '" placeholder="Email">' +
-   '<input id="pw" type="password" autocomplete="current-password" class="' + INP + '" placeholder="Password">' +
+   '<input id="em" type="email" aria-label="Email" autocomplete="email" class="' + INP + '" placeholder="Email">' +
+   '<input id="pw" type="password" aria-label="Password" autocomplete="current-password" class="' + INP + '" placeholder="Password">' +
    '<p id="lm" class="text-xs text-red-600"></p>' +
    '<div class="flex gap-2"><button id="li" class="' + PRI + '">Sign In</button><button id="su" class="' + GHO + '">Create Viewer Account</button></div></div></div>';
 }
@@ -329,7 +425,7 @@ function bindLogin(){
     if (!emailEl || !passEl) return;
     const c = {email: emailEl.value, password: passEl.value}; 
     const r = su ? await sb.auth.signUp(c) : await sb.auth.signInWithPassword(c); 
-    $('lm').textContent = r.error?.message || (su ? 'Account created.' : ''); 
+    $('lm').textContent = r.error?.message || (su ? 'Account created. If email confirmation is enabled, check your inbox first.' : ''); 
   };
   $('li').onclick = () => go(false); 
   $('su').onclick = () => go(true); 
@@ -348,19 +444,22 @@ function render(){
     '<div class="hidden px-2 pb-3 pt-1 text-sm font-semibold text-white md:block">Area Dimension Monitoring</div>' +
     nav.map(([k, l]) => '<button data-nav="' + k + '" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm ' + (S.page===k?'bg-blue-600 text-white':'hover:bg-white/10') + '">' + l + '</button>').join('') +
     '<button id="out" class="whitespace-nowrap rounded-md px-3 py-2 text-left text-sm hover:bg-white/10 md:mt-auto">Logout</button></nav>' +
-    '<main class="min-h-0 flex-1 overflow-auto p-3 md:p-5">' + (S.viewPlan && isAdmin() && S.plan ? '<p class="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">Reviewing inactive floor plan.</p>' : '') + body + '</main></div>';
+    '<main class="min-h-0 flex-1 overflow-auto p-3 md:p-5">' + (S.viewPlan && isAdmin() && S.plan ? '<p class="mb-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">Reviewing inactive floor plan (Floor ' + esc(S.plan.floor) + ').</p>' : '') + body + '</main></div>';
   
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => { 
-    const k = b.dataset.nav, wasRev = S.viewPlan; 
+    const k = b.dataset.nav; 
     if(k !== 'manage' && k !== 'settings' && S.viewPlan) S.viewPlan = null; 
     S.page = k; S.editId = null; S.form = {}; 
+    if(k === 'manage' && !S.viewPlan) S.mFloor = null;      // always ask for the floor first
     if(k === 'settings') loadPlans(); 
-    (wasRev && !S.viewPlan) ? load() : render(); 
+    if(k === 'manage' && !S.mFloor) render();
+    else if(want() !== S.ctx) load();
+    else render();
   });
   $('out').onclick = () => sb.auth.signOut();
-  if(S.page === 'dashboard' || S.page === 'plan') bindPlanPage(); 
-  else if(S.page === 'directory') bindDirectory(); 
-  else if(S.page === 'manage') bindManage(); 
+  if(S.page === 'dashboard' || S.page === 'plan'){ bindFloorTabs(); bindPlanPage(); }
+  else if(S.page === 'directory'){ bindFloorTabs(); bindDirectory(); }
+  else if(S.page === 'manage') S.mFloor ? bindManage() : bindFloorPick();
   else bindSettings();
 }
 
