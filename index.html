@@ -633,20 +633,22 @@ function loginHTML(){
    '<input id="em" type="email" aria-label="Email" autocomplete="email" class="' + INP + '" placeholder="Email">' +
    '<input id="pw" type="password" aria-label="Password" autocomplete="current-password" class="' + INP + '" placeholder="Password">' +
    '<p id="lm" class="text-xs text-red-600"></p>' +
-   '<div class="flex gap-2"><button id="li" class="' + PRI + '">Sign In</button><button id="su" class="' + GHO + '">Create Viewer Account</button></div></div></div>';
+   '<button id="li" class="' + PRI + ' w-full">Sign In</button></div></div>';
 }
 
 function bindLogin(){
-  const go = async su => { 
+  const go = async () => { 
     const emailEl = $('em'), passEl = $('pw');
     if (!emailEl || !passEl) return;
     const c = {email: emailEl.value, password: passEl.value}; 
-    const r = su ? await sb.auth.signUp(c) : await sb.auth.signInWithPassword(c); 
-    $('lm').textContent = r.error?.message || (su ? 'Account created. If email confirmation is enabled, check your inbox first.' : ''); 
+    $('li').disabled = true;
+    const r = await sb.auth.signInWithPassword(c); 
+    $('li').disabled = false;
+    $('lm').textContent = r.error?.message || ''; 
   };
-  $('li').onclick = () => go(false); 
-  $('su').onclick = () => go(true); 
-  $('pw').onkeydown = e => { if(e.key === 'Enter') go(false); };
+  $('li').onclick = go; 
+  $('pw').onkeydown = e => { if(e.key === 'Enter') go(); };
+  $('em').onkeydown = e => { if(e.key === 'Enter') go(); };
 }
 
 function render(){
