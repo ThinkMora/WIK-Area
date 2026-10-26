@@ -369,9 +369,9 @@ function settingsHTML(){
    '<input id="pname" class="' + INP + '" placeholder="Floor plan name">' +
    '<label class="block text-xs text-slate-600">Floor<select id="pfloor" class="' + INP + ' mt-0.5 w-40">' + FLOORS.map(n => '<option value="' + n + '">Floor ' + n + '</option>').join('') + '</select></label>' +
    '<input id="pfile" type="file" accept="image/png,image/jpeg,image/webp" class="text-sm"><img id="pprev" alt="Preview" class="hidden max-h-56 rounded border"><button id="pup" class="' + PRI + '">Upload Plan</button></div>' +
-   '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3><p class="text-xs text-slate-500">Each floor has its own active floor plan.</p>' + ps.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' <span class="ml-1 rounded bg-slate-100 px-1.5 text-xs text-slate-700">Floor ' + esc(p.floor) + '</span> ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
+   '<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-4"><h3 class="font-semibold">Floor Plan List</h3><p class="text-xs text-slate-500">Each floor has its own active floor plan. Use "Replace image" to swap in a higher-resolution picture; area markings are kept.</p>' + ps.map(p => '<div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-sm"><span class="flex-1 font-medium">' + esc(p.name) + ' <span class="ml-1 rounded bg-slate-100 px-1.5 text-xs text-slate-700">Floor ' + esc(p.floor) + '</span> ' + (p.is_active ? '<span class="ml-1 rounded bg-teal-100 px-1.5 text-xs text-teal-700">Active</span>' : '') + '</span>' +
     (p.is_active ? '' : '<select data-pf="' + p.id + '" aria-label="Change floor" class="' + INP + ' w-24">' + FLOORS.map(n => '<option value="' + n + '" ' + (n === p.floor ? 'selected' : '') + '>Floor ' + n + '</option>').join('') + '</select>' +
-      '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan (Floor ' + esc(p.floor) + ')</button>') + '<button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" aria-label="Delete floor plan" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet.</p></div></div>';
+      '<button data-copy="' + p.id + '" class="' + GHO + '">Copy areas from active plan (Floor ' + esc(p.floor) + ')</button>') + '<button data-img="' + p.id + '" class="' + GHO + '">Replace image</button><button data-rev="' + p.id + '" class="' + GHO + '">Review overlay</button>' + (p.is_active ? '' : '<button data-act="' + p.id + '" class="' + PRI + '">Activate</button><button data-rm="' + p.id + '" aria-label="Delete floor plan" class="p-1 text-red-600">🗑</button>') + '</div>').join('') + '<p class="text-sm text-slate-500 ' + (S.plans.length ? 'hidden' : '') + '">No floor plans yet.</p></div></div>';
 }
 
 function bindSettings(){
@@ -413,6 +413,35 @@ function bindSettings(){
     error ? toast(error.message) : toast(data + ' areas copied.'); 
   });
   document.querySelectorAll('[data-rev]').forEach(b => b.onclick = () => { const p = P(b.dataset.rev); S.viewPlan = p.id; S.mFloor = p.floor; S.sel = null; S.page = 'manage'; load(); });
+  document.querySelectorAll('[data-img]').forEach(b => b.onclick = () => {
+    const p = P(b.dataset.img), inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp';
+    inp.onchange = async () => {
+      const f = inp.files[0]; if(!f) return;
+      b.disabled = true; const label = b.textContent; b.textContent = 'Replacing…';
+      const done = () => { b.disabled = false; b.textContent = label; };
+      const u = URL.createObjectURL(f);
+      try {
+        const dim = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok({w: i.naturalWidth, h: i.naturalHeight}); i.onerror = () => no(new Error('The selected file is not a readable image.')); i.src = u; });
+        if(p.image_width && p.image_height){
+          const oldR = p.image_width / p.image_height, newR = dim.w / dim.h;
+          if(Math.abs(newR - oldR) / oldR > 0.01 &&
+             !confirm('The new image has a different proportion (' + dim.w + '×' + dim.h + ') than the current one (' + p.image_width + '×' + p.image_height + '). Area markings are stored as relative positions, so they may no longer line up with the drawing.\n\nReplace anyway?')){ done(); return; }
+        }
+        const path = crypto.randomUUID() + '-' + f.name.replace(/[^\w.-]/g, '_');
+        const up = await sb.storage.from('floor-plans').upload(path, f);
+        if(up.error) throw up.error;
+        const {error} = await sb.from('floor_plans').update({storage_path: path, image_width: dim.w, image_height: dim.h}).eq('id', p.id);
+        if(error){ await sb.storage.from('floor-plans').remove([path]); throw error; }
+        await sb.storage.from('floor-plans').remove([p.storage_path]);   // old file is no longer referenced
+        toast('Image replaced (' + dim.w + '×' + dim.h + ').');
+        await loadPlans();
+        if(S.plan && S.plan.id === p.id) load();
+      } catch(err) { toast('Replace failed: ' + (err.message || err)); }
+      finally { URL.revokeObjectURL(u); done(); }
+    };
+    inp.click();
+  });
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => { 
     const p = P(b.dataset.rm); 
     if(!confirm('Delete floor plan?')) return;
