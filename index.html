@@ -202,7 +202,10 @@ function planGrid(){
   return '<div class="grid h-full gap-4 lg:grid-cols-[1fr_320px]"><div class="flex min-h-0 flex-col gap-3"><div class="flex flex-wrap gap-2">' +
     '<input id="q" class="' + INP + ' min-w-40 flex-1" placeholder="Search code or name" value="' + esc(S.q) + '">' +
     '<select id="ddl" aria-label="Select area" class="' + INP + ' w-56"><option value="">All areas</option>' + hits.map(a => '<option value="' + a.id + '" ' + (a.id===S.sel?'selected':'') + '>' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</option>').join('') + '</select>' +
-    '<button id="lbl" class="' + GHO + '">' + (S.labels ? 'Hide labels' : 'Show all areas') + '</button>' + (S.sel ? '<button id="clr" class="' + GHO + '">Show full plan</button>' : '') + '</div>' +
+    '<button id="lbl" class="' + GHO + '">' + (S.labels ? 'Hide labels' : 'Show all areas') + '</button>' + (S.sel ? '<button id="clr" class="' + GHO + '">Show full plan</button>' : '') +
+    '<select id="dlf" aria-label="Download format" class="' + INP + ' w-28"><option value="png" ' + (DL.fmt === 'png' ? 'selected' : '') + '>PNG</option><option value="pdf" ' + (DL.fmt === 'pdf' ? 'selected' : '') + '>PDF</option></select>' +
+    '<select id="dll" aria-label="Labels in downloaded layout" class="' + INP + ' w-44"><option value="1" ' + (DL.labels === '1' ? 'selected' : '') + '>Download with labels</option><option value="0" ' + (DL.labels === '0' ? 'selected' : '') + '>Download without labels</option></select>' +
+    '<button id="dlb" ' + (!S.plan || S.loading || DL.busy ? 'disabled' : '') + ' class="' + PRI + '">Download layout</button></div>' +
     '<div class="min-h-[420px] flex-1">' + planHTML(false) + '</div></div>' + detailsHTML() + '</div>';
 }
 
@@ -223,6 +226,9 @@ function bindPlanPage(){
   $('ddl').onchange = e => select(e.target.value || null); 
   $('lbl').onclick = () => { S.labels = !S.labels; render(); }; 
   if($('clr')) $('clr').onclick = () => select(null);
+  $('dll').onchange = e => { DL.labels = e.target.value; };
+  $('dlf').onchange = e => { DL.fmt = e.target.value; };
+  $('dlb').onclick = downloadLayout;
   bindPlan(false);
 }
 
@@ -519,30 +525,70 @@ function exportXlsx(){
 }
 
 // floor plan image with the area rectangles drawn on top (areas of the chosen department highlighted)
-async function rLayoutImage(plan, areas){
+async function layoutCanvas(plan, areas, o){
+  o = o || {};
+  const showLabels = o.labels !== false, dept = o.dept || '', maxW = o.max || 1800;
   const { data: blob, error } = await sb.storage.from('floor-plans').download(plan.storage_path);
   if(error || !blob) throw new Error(error?.message || 'Could not download the floor plan image');
   const url = URL.createObjectURL(blob);
   try {
     const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('Floor plan image could not be read')); i.src = url; });
-    const k = Math.min(1, 1800 / img.naturalWidth), W = Math.round(img.naturalWidth * k), H = Math.round(img.naturalHeight * k);
+    const k = Math.min(1, maxW / img.naturalWidth), W = Math.round(img.naturalWidth * k), H = Math.round(img.naturalHeight * k);
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
     const lw = Math.max(2, W / 600);
     g.lineJoin = 'round'; g.textAlign = 'center'; g.textBaseline = 'middle';
     for(const a of areas){
-      const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H, on = !R.dept || a.department === R.dept;
+      const x = a.x * W, y = a.y * H, w = a.w * W, h = a.h * H, on = !dept || a.department === dept;
       if(on){ g.fillStyle = 'rgba(37,99,235,.18)'; g.fillRect(x, y, w, h); }
       g.lineWidth = on ? lw : lw / 2; g.strokeStyle = on ? '#2563eb' : 'rgba(100,116,139,.55)'; g.strokeRect(x, y, w, h);
       const fs = Math.min(h * .4, w / Math.max(String(a.area_code).length, 1) * 1.6);
-      if(on && fs >= 6){
+      if(showLabels && on && fs >= 6){
         g.font = '600 ' + fs + 'px Helvetica, Arial, sans-serif';
         g.lineWidth = fs / 6; g.strokeStyle = '#fff'; g.strokeText(String(a.area_code), x + w / 2, y + h / 2);
         g.fillStyle = '#1e3a8a'; g.fillText(String(a.area_code), x + w / 2, y + h / 2);
       }
     }
-    return { data: c.toDataURL('image/jpeg', .85), w: W, h: H };
+    return c;
   } finally { URL.revokeObjectURL(url); }
+}
+
+async function rLayoutImage(plan, areas){
+  const c = await layoutCanvas(plan, areas, {max: 1800, labels: true, dept: R.dept});
+  return { data: c.toDataURL('image/jpeg', .85), w: c.width, h: c.height };
+}
+
+/* ---------- download layout (Dashboard / Interactive Floor Plan) ---------- */
+const DL = { labels: '1', fmt: 'png', busy: false };
+async function downloadLayout(){
+  if(!S.plan || DL.busy) return;
+  DL.busy = true; const btn = $('dlb'); if(btn){ btn.disabled = true; btn.textContent = 'Preparing…'; }
+  const withLabels = DL.labels === '1', fl = S.plan.floor ?? S.floor, pdf = DL.fmt === 'pdf';
+  try {
+    const name = ['layout', 'floor-' + fl, withLabels ? 'with-labels' : 'no-labels', rStamp()].join('_') + '.' + DL.fmt;
+    if(!pdf){
+      const c = await layoutCanvas(S.plan, S.areas, {max: 4000, labels: withLabels});
+      const blob = await new Promise(ok => c.toBlob(ok, 'image/png'));
+      if(!blob) throw new Error('Could not create the image');
+      saveBlob(blob, name);
+    } else {
+      const J = window.jspdf && window.jspdf.jsPDF;
+      if(!J) throw new Error('PDF library failed to load. Reload the page and try again.');
+      const c = await layoutCanvas(S.plan, S.areas, {max: 3000, labels: withLabels});
+      const land = c.width >= c.height, doc = new J({unit: 'mm', format: 'a4', orientation: land ? 'landscape' : 'portrait'});
+      const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 12, top = 24;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42); doc.text('Floor ' + fl + ' Layout - ' + S.plan.name, M, 14);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
+      doc.text(rDate() + '   |   ' + S.areas.length + ' areas   |   Labels: ' + (withLabels ? 'shown' : 'hidden'), M, 20);
+      try { doc.addImage(LOGO.dark, 'PNG', PW - M - 28, 6, 28, 28 * 331 / 820); } catch(e) {}
+      const s = Math.min((PW - 2 * M) / c.width, (PH - top - M) / c.height), w = c.width * s, hh = c.height * s;
+      doc.addImage(c.toDataURL('image/jpeg', .92), 'JPEG', M + (PW - 2 * M - w) / 2, top, w, hh);
+      doc.setDrawColor(203, 213, 225); doc.setLineWidth(.3); doc.rect(M + (PW - 2 * M - w) / 2, top, w, hh);
+      doc.save(name);
+    }
+    toast('Layout downloaded (Floor ' + fl + ', ' + DL.fmt.toUpperCase() + ', ' + (withLabels ? 'with' : 'without') + ' labels).');
+  } catch(err) { toast('Download failed: ' + err.message); }
+  finally { DL.busy = false; const b2 = $('dlb'); if(b2){ b2.disabled = false; b2.textContent = 'Download layout'; } }
 }
 
 async function exportPdf(){
