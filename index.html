@@ -204,7 +204,7 @@ function planGrid(){
     '<select id="ddl" aria-label="Select area" class="' + INP + ' w-56"><option value="">All areas</option>' + hits.map(a => '<option value="' + a.id + '" ' + (a.id===S.sel?'selected':'') + '>' + esc(a.area_code) + ' — ' + esc(a.area_name) + '</option>').join('') + '</select>' +
     '<button id="lbl" class="' + GHO + '">' + (S.labels ? 'Hide labels' : 'Show all areas') + '</button>' + (S.sel ? '<button id="clr" class="' + GHO + '">Show full plan</button>' : '') +
     '<select id="dlf" aria-label="Download format" class="' + INP + ' w-28"><option value="png" ' + (DL.fmt === 'png' ? 'selected' : '') + '>PNG</option><option value="pdf" ' + (DL.fmt === 'pdf' ? 'selected' : '') + '>PDF</option></select>' +
-    '<select id="dll" aria-label="Labels in downloaded layout" class="' + INP + ' w-44"><option value="1" ' + (DL.labels === '1' ? 'selected' : '') + '>Download with labels</option><option value="0" ' + (DL.labels === '0' ? 'selected' : '') + '>Download without labels</option></select>' +
+    '<select id="dll" aria-label="Labels in downloaded layout" class="' + INP + ' w-64"><option value="1" ' + (DL.labels === '1' ? 'selected' : '') + '>Download with labels &amp; markings</option><option value="0" ' + (DL.labels === '0' ? 'selected' : '') + '>Download without labels &amp; markings</option></select>' +
     '<button id="dlb" ' + (!S.plan || S.loading || DL.busy ? 'disabled' : '') + ' class="' + PRI + '">Download layout</button></div>' +
     '<div class="min-h-[420px] flex-1">' + planHTML(false) + '</div></div>' + detailsHTML() + '</div>';
 }
@@ -567,26 +567,26 @@ async function downloadLayout(){
   try {
     const name = ['layout', 'floor-' + fl, withLabels ? 'with-labels' : 'no-labels', rStamp()].join('_') + '.' + DL.fmt;
     if(!pdf){
-      const c = await layoutCanvas(S.plan, S.areas, {max: 4000, labels: withLabels});
+      const c = await layoutCanvas(S.plan, withLabels ? S.areas : [], {max: 4000, labels: withLabels});
       const blob = await new Promise(ok => c.toBlob(ok, 'image/png'));
       if(!blob) throw new Error('Could not create the image');
       saveBlob(blob, name);
     } else {
       const J = window.jspdf && window.jspdf.jsPDF;
       if(!J) throw new Error('PDF library failed to load. Reload the page and try again.');
-      const c = await layoutCanvas(S.plan, S.areas, {max: 3000, labels: withLabels});
+      const c = await layoutCanvas(S.plan, withLabels ? S.areas : [], {max: 3000, labels: withLabels});
       const land = c.width >= c.height, doc = new J({unit: 'mm', format: 'a4', orientation: land ? 'landscape' : 'portrait'});
       const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 12, top = 24;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42); doc.text('Floor ' + fl + ' Layout - ' + S.plan.name, M, 14);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-      doc.text(rDate() + '   |   ' + S.areas.length + ' areas   |   Labels: ' + (withLabels ? 'shown' : 'hidden'), M, 20);
+      doc.text(rDate() + (withLabels ? '   |   ' + S.areas.length + ' areas   |   Labels & markings: shown' : '   |   Plain layout (no labels & markings)'), M, 20);
       try { doc.addImage(LOGO.dark, 'PNG', PW - M - 28, 6, 28, 28 * 331 / 820); } catch(e) {}
       const s = Math.min((PW - 2 * M) / c.width, (PH - top - M) / c.height), w = c.width * s, hh = c.height * s;
       doc.addImage(c.toDataURL('image/jpeg', .92), 'JPEG', M + (PW - 2 * M - w) / 2, top, w, hh);
       doc.setDrawColor(203, 213, 225); doc.setLineWidth(.3); doc.rect(M + (PW - 2 * M - w) / 2, top, w, hh);
       doc.save(name);
     }
-    toast('Layout downloaded (Floor ' + fl + ', ' + DL.fmt.toUpperCase() + ', ' + (withLabels ? 'with' : 'without') + ' labels).');
+    toast('Layout downloaded (Floor ' + fl + ', ' + DL.fmt.toUpperCase() + ', ' + (withLabels ? 'with' : 'without') + ' labels & markings).');
   } catch(err) { toast('Download failed: ' + err.message); }
   finally { DL.busy = false; const b2 = $('dlb'); if(b2){ b2.disabled = false; b2.textContent = 'Download layout'; } }
 }
